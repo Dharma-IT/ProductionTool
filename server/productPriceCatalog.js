@@ -41,6 +41,7 @@ export const productPriceCatalog = [
   { name: 'Sleep Strips', price: 29.9 },
   { name: 'Berberine + & Weight Balance', price: 45 },
   { name: 'Berberine+ & Pierde Peso', price: 45 },
+  { name: 'GLP-1 Support | Daily Metabolic, Gut & Micronutrient Formula', price: 45 },
   { name: 'Hydraglow Powder (Lemonade)', price: 34.99 },
   { name: 'Colon Gentle Cleanse', price: 33.9 },
   { name: 'Colostrum Capsules', price: 33.9 },
