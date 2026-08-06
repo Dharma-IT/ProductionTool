@@ -1,4 +1,4 @@
-const sessionCacheKey = 'shopify-tracking-report:v4'
+const sessionCacheKey = 'shopify-tracking-report:v5'
 const defaultRowsLimit = 1000
 const sessionCacheTtlMs = 5 * 60 * 1000
 

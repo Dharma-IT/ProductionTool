@@ -332,10 +332,10 @@ function normalizeTrackingOrderKey(value) {
 
 function readExcludedTrackingOrderNumbers() {
   const configuredValue = process.env.SHOPIFY_TRACKING_EXCLUDED_ORDERS ?? 'cb_test_order'
+  const manuallyExcludedOrderNumbers = ['4864']
 
   return new Set(
-    configuredValue
-      .split(',')
+    [...configuredValue.split(','), ...manuallyExcludedOrderNumbers]
       .map(normalizeTrackingOrderKey)
       .filter(Boolean),
   )
@@ -1672,13 +1672,13 @@ async function buildShopifyTrackingReport(options = {}) {
       .filter(Boolean),
   )
   const visibleOrders = orders.filter((order) => !isRefundedOrCancelledShopifyOrder(order))
-  const rows = visibleOrders.flatMap((order) => {
+  const rows = filterExcludedTrackingOrders(visibleOrders.flatMap((order) => {
     const lineItems = order.line_items ?? []
 
     return lineItems.length > 0
       ? lineItems.map((lineItem, index) => normalizeShopifyOrderLine(order, lineItem, index))
       : [normalizeShopifyOrder(order)]
-  })
+  }))
   const sheetStatusLookup = await loadSheetStatusLookup()
   const rowsWithSheetStatus = rows.map((row) => applySheetStatus(row, sheetStatusLookup))
   const rowsWithDetoxTeaShippingConfirmationStatus = rowsWithSheetStatus

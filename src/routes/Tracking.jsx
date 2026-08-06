@@ -129,10 +129,21 @@ function getTrackingOrderKey(row) {
   return String(row.orderNumber || row.rowId || '').trim()
 }
 
+function isUntrackableDetoxTeaRow(row) {
+  return String(row.item ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .includes('detox tea')
+}
+
 function getOrderWarningSummary(rows) {
   const ordersByKey = new Map()
 
   rows.forEach((row) => {
+    if (isUntrackableDetoxTeaRow(row)) return
+
     const orderKey = getTrackingOrderKey(row)
     if (!orderKey) return
 
