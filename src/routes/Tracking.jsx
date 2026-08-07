@@ -130,12 +130,13 @@ function getTrackingOrderKey(row) {
 }
 
 function isUntrackableDetoxTeaRow(row) {
-  return String(row.item ?? '')
+  const normalizedItem = String(row.item ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
-    .includes('detox tea')
+
+  return normalizedItem.includes('detox tea') || normalizedItem.includes('te detox')
 }
 
 function getOrderWarningSummary(rows) {
