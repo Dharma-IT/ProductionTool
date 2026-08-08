@@ -2691,6 +2691,23 @@ function scoreCatalogMatch(item, catalogItem) {
 }
 
 function findBestCatalogMatch(item, catalog) {
+  const itemText = normalizePricingText(item.name)
+
+  // "GLP-1 Support" is the supplement name. Do not let the GLP-1 token
+  // fuzzy-match the separate "Non GLP-1 Clients" consultation product.
+  if (/\bglp\s*1\s+support\b/.test(itemText)) {
+    const supplementMatch = catalog.find((catalogItem) =>
+      /\bglp\s*1\s+support\b/.test(catalogItem.normalizedText),
+    )
+
+    if (supplementMatch) {
+      return {
+        ...supplementMatch,
+        score: 1000,
+      }
+    }
+  }
+
   const scoredMatches = catalog
     .map((catalogItem) => ({
       catalogItem,
