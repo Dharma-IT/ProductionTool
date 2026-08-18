@@ -2082,7 +2082,7 @@
 
 .analytics-summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -2137,6 +2137,11 @@
 .analytics-total-card.confirmed-called::before,
 .analytics-total-card.confirmed-called .metric-rail span {
   background: #7c5cbd;
+}
+
+.analytics-total-card.bot-calls::before,
+.analytics-total-card.bot-calls .metric-rail span {
+  background: #00a4bd;
 }
 
 .analytics-total-card span,

@@ -19,6 +19,8 @@ const outboundCallerAssignments = [
       'María Claudia',
       'Maria Claudia',
       'Diana Villalobos',
+      'Erika Vargas',
+      'Ailin Isabel',
       'MarÃ­a Claudia',
     ],
   },
@@ -955,6 +957,14 @@ function HubSpotCallReport() {
               <small>Confirmed appointments called before the appointment</small>
               <div className="metric-rail" aria-hidden="true">
                 <span style={{ width: `${confirmedCalledRate}%` }} />
+              </div>
+            </div>
+            <div className="analytics-total-card bot-calls">
+              <span>Bot Calls</span>
+              <strong>{uploadedCallNumbers.size}</strong>
+              <small>Contacts in the uploaded Excel file used for cross-checking</small>
+              <div className="metric-rail" aria-hidden="true">
+                <span style={{ width: uploadedCallNumbers.size > 0 ? '100%' : '0%' }} />
               </div>
             </div>
           </div>
