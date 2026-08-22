@@ -42,7 +42,7 @@ function Home() {
     <section className="route-view landing-page" aria-labelledby="landing-title">
       <div className="landing-hero">
         <span className="landing-kicker">Production workspace</span>
-        <h1 id="landing-title">Everything your team needs, in one place.</h1>
+        <h1 id="landing-title">Production Tool Dashboard</h1>
         <p>Choose a workspace below to verify payments, review call activity, or track customer orders.</p>
       </div>
 
