@@ -1,20 +1,23 @@
 import './App.css'
+import Home from './routes/Home'
 import HomeDashboard from './routes/HomeDashboard'
 import HubSpotCallReport from './routes/HubSpotCallReport'
 import Tracking from './routes/Tracking'
 
 const routes = {
-  '/': HomeDashboard,
-  '/home': HomeDashboard,
+  '/': Home,
+  '/home': Home,
+  '/verifier': HomeDashboard,
   '/call-report': HubSpotCallReport,
   '/tracking': Tracking,
 }
 
 function App() {
   const currentPath = window.location.pathname
-  const ActiveRoute = routes[currentPath] ?? HomeDashboard
+  const ActiveRoute = routes[currentPath] ?? Home
   const tabs = [
     { href: '/home', label: 'Home' },
+    { href: '/verifier', label: 'Verifier' },
     { href: '/call-report', label: 'Call Report' },
     { href: '/tracking', label: 'Tracking' },
   ]

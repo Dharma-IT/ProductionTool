@@ -497,7 +497,7 @@ function HomeDashboard() {
   }
 
   return (
-    <section className="route-view" aria-label="Home dashboard">
+    <section className="route-view" aria-label="Payment verifier">
       <div className="report-toolbar home-toolbar">
         <div>
           <h1>Payment Verification</h1>
@@ -520,7 +520,7 @@ function HomeDashboard() {
       </div>
 
       <div className="home-dashboard-shell">
-        <nav className="home-view-tabs" aria-label="Home dashboard views">
+        <nav className="home-view-tabs" aria-label="Verifier views">
           <button
             type="button"
             className={activeHomeView === 'verification' ? 'active' : ''}
