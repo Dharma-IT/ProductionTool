@@ -2656,6 +2656,20 @@ function scoreCatalogMatch(item, catalogItem) {
   const catalogDurationMonths = readDurationMonths(catalogItem.productTitle)
   const itemDurationMonths = readDurationMonths(item.name)
 
+  const medicationFamilies = [
+    'semaglutide',
+    'tirzepatide',
+    'sermorelin',
+    'glutathione',
+    'slimboost',
+  ]
+  const itemMedication = medicationFamilies.find((family) => itemText.includes(family))
+  const catalogMedication = medicationFamilies.find((family) => catalogItem.normalizedText.includes(family))
+
+  // A matching duration alone must never allow one medication to be priced as
+  // another (for example, Tirzepatide 2 months as Sermorelin 2 months).
+  if (itemMedication && catalogMedication && itemMedication !== catalogMedication) return 0
+
   if (catalogItem.normalizedText.includes(itemText)) score += 120
   if (productTitleText && itemText.includes(productTitleText)) score += 80
 
@@ -2990,6 +3004,7 @@ function resolveFinancingFeePolicy(row, baseExpectedTotalCents) {
     row.Description,
   ].join(' '))
   const financingMethods = [
+    { label: 'Stripe card processing', pattern: /\bstripe\b.*\bcard\b|\bcard\b.*\bstripe\b/ },
     { label: 'Affirm', pattern: /\baffirm\b/ },
     { label: 'Klarna', pattern: /\bklarna\b/ },
     { label: 'Afterpay/Clearpay', pattern: /\b(?:afterpay|clearpay)\b/ },
