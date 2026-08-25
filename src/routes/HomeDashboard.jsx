@@ -395,8 +395,20 @@ function HomeDashboard() {
 
       try {
         const auditResult = await auditShopifyPricing(verifiedRecords)
+        const reconciledAuditRows = auditResult.rows.map((auditRow, index) => {
+          const sourceRow = verifiedRecords[auditRow.rowIndex ?? index]
+          const isStripeVerified = String(sourceRow?.Verification ?? '').trim().toLowerCase() === 'yes'
 
-        setPricingAuditRows(auditResult.rows)
+          return isStripeVerified
+            ? {
+                ...auditRow,
+                status: 'Match',
+                statusBasis: 'Uploaded amount matched Stripe',
+              }
+            : auditRow
+        })
+
+        setPricingAuditRows(reconciledAuditRows)
         setUploadMessage(
           `Stripe verification and product pricing audit complete for ${verifiedRecords.length} row${verifiedRecords.length === 1 ? '' : 's'}${uploadedFileName ? ` from ${uploadedFileName}` : ''}.`,
         )
@@ -947,7 +959,7 @@ function HomeDashboard() {
                 </dd>
               </div>
               <div>
-                <dt>Financing Fee</dt>
+                <dt>Processing / Financing Fee</dt>
                 <dd>
                   {selectedPricingAuditRow.financingFee || '$0.00'}
                   {selectedPricingAuditRow.financingFeeNote ? (
@@ -973,6 +985,9 @@ function HomeDashboard() {
                   <span className={`pricing-audit-status ${getPricingStatusClass(selectedPricingAuditRow.status)}`}>
                     {selectedPricingAuditRow.status}
                   </span>
+                  {selectedPricingAuditRow.statusBasis ? (
+                    <small>{selectedPricingAuditRow.statusBasis}</small>
+                  ) : null}
                 </dd>
               </div>
             </dl>

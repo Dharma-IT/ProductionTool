@@ -3065,11 +3065,14 @@ async function auditShopifyPricingRows(rows) {
     const collectedCents = parseMoneyToCents(row['Total Collected']) ?? 0
     const differenceCents = collectedCents - expectedTotalCents
     const hasMissingMatches = auditedItems.some((item) => !item.matched)
-    const status = hasMissingMatches
-      ? 'Needs Review'
-      : Math.abs(differenceCents) <= 1
-        ? 'Match'
-        : 'Mismatch'
+    const isStripeVerified = String(row.Verification ?? '').trim().toLowerCase() === 'yes'
+    const status = isStripeVerified
+      ? 'Match'
+      : hasMissingMatches
+        ? 'Needs Review'
+        : Math.abs(differenceCents) <= 1
+          ? 'Match'
+          : 'Mismatch'
 
     auditedRows.push({
       rowIndex,
@@ -3089,6 +3092,7 @@ async function auditShopifyPricingRows(rows) {
       totalCollected: formatCents(collectedCents),
       difference: formatCents(differenceCents),
       status,
+      statusBasis: isStripeVerified ? 'Uploaded amount matched Stripe' : 'Product pricing audit',
       items: auditedItems,
     })
   }
