@@ -7,6 +7,7 @@ const defaultAverageRuntimeMs = 45000
 const averageRuntimeCacheKey = 'hubspot-call-report-average-runtime-ms'
 const outboundAssignmentStorageKey = 'hubspot-call-report-outbound-assignments'
 const missingCallerName = 'No caller found'
+const additionalOutboundCallerNames = ['Zara Meza']
 const outboundCallerAssignments = [
   {
     id: 'laura-main',
@@ -550,6 +551,7 @@ function HubSpotCallReport() {
     return [...new Set([
       ...outboundCallerAssignments.map((assignment) => assignment.ownerName),
       ...outboundCallerAssignments.flatMap((assignment) => assignment.agentNames),
+      ...additionalOutboundCallerNames,
       ...scheduleRows.map((row) => row.callerName),
       ...scheduleRows.map((row) => row.meetingHost),
     ].filter(Boolean).map(getDisplayPersonName))]
