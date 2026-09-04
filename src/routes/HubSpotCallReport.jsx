@@ -25,6 +25,26 @@ const outboundCallerAssignments = [
       'MarÃ­a Claudia',
     ],
   },
+  {
+    id: 'zara-main',
+    ownerName: 'Zara Meza',
+    agentNames: [
+      'Alice F',
+      'Alice Strelow',
+      'Arles Martinez',
+      'Brayam Zuluaga',
+      'Edmilson Morales',
+      'Edmilson Velasquez',
+    ],
+  },
+  {
+    id: 'zara-secondary',
+    ownerName: 'Zara Meza',
+    agentNames: [
+      'Maria Sandoval',
+      'Paula Alfonso',
+    ],
+  },
 ]
 
 function normalizePersonName(value) {
@@ -610,6 +630,60 @@ function HubSpotCallReport() {
         || left.callerName.localeCompare(right.callerName),
       )
   }, [outboundAssignmentOverrides, scheduleRows])
+  const zaraPreviousDayCalling = useMemo(() => {
+    const assignment = outboundCallerAssignments.find((entry) => entry.id === 'zara-secondary')
+    if (!assignment) return null
+
+    const shouldUseCurrentDayCalling = reportWeekday === 'Monday'
+    const assignedCallerName = outboundAssignmentOverrides[assignment.ownerName] || assignment.ownerName
+    const assignedCallerKey = normalizePersonName(assignedCallerName)
+    const agentRows = createEmptyAssignmentStats({
+      ...assignment,
+      id: 'zara-previous-day',
+    }, assignedCallerName)
+    const assignmentByAgentName = new Map(
+      assignment.agentNames.map((agentName) => [normalizePersonName(agentName), agentName]),
+    )
+
+    scheduleRows.forEach((row) => {
+      const meetingHostName = row.meetingHost || 'Unassigned'
+      const rosterAgentName = assignmentByAgentName.get(normalizePersonName(meetingHostName))
+      if (!rosterAgentName) return
+
+      const meetingHost = agentRows.meetingHosts.get(normalizePersonName(rosterAgentName))
+      const callerNames = shouldUseCurrentDayCalling ? row.qualifyingCallers : row.previousDayCallers
+      const previousDayCalledByAssignedCaller = row.uploadedCallMatched
+        || (!shouldUseCurrentDayCalling && row.previousDayConnected)
+        || (callerNames ?? [])
+          .some((callerName) => normalizePersonName(callerName) === assignedCallerKey)
+
+      agentRows.totalAppointments += 1
+      meetingHost.totalAppointments += 1
+
+      if (row.confirmation === 'Confirmed' && !previousDayCalledByAssignedCaller && !row.outboundExempt) {
+        agentRows.notCalled += 1
+        meetingHost.notCalled += 1
+        agentRows.notCalledRows.push(row)
+        meetingHost.notCalledRows.push(row)
+      } else if (row.confirmation === 'Confirmed' && previousDayCalledByAssignedCaller) {
+        agentRows.confirmedCalled += 1
+        meetingHost.confirmedCalled += 1
+      }
+    })
+
+    return {
+      ...agentRows,
+      meetingHosts: [...agentRows.meetingHosts.values()]
+        .filter((meetingHost) => meetingHost.totalAppointments > 0)
+        .sort((left, right) =>
+          right.totalAppointments - left.totalAppointments
+          || left.meetingHostName.localeCompare(right.meetingHostName),
+        ),
+      confirmedShare: scheduleRows.length > 0
+        ? Math.round((agentRows.totalAppointments / scheduleRows.length) * 100)
+        : 0,
+    }
+  }, [outboundAssignmentOverrides, reportWeekday, scheduleRows])
   const confirmedRate = scheduleRows.length > 0
     ? Math.round((totalConfirmedAppointments / scheduleRows.length) * 100)
     : 0
@@ -973,6 +1047,82 @@ function HubSpotCallReport() {
                 </div>
               </article>
             ))}
+            {zaraPreviousDayCalling && (
+              <article className="agent-confirmed-card previous-day-analytics" aria-label="Zara previous day calling">
+                <div className="agent-confirmed-header">
+                  <div>
+                    <h3 title="Zara previous day calling">Zara Previous Day Calling</h3>
+                    <p>Zara team previous-day calls for Paula Alfonso and Maria Sandoval.</p>
+                  </div>
+                  <div className="agent-confirmed-actions">
+                    <button
+                      className="agent-export-button"
+                      disabled={zaraPreviousDayCalling.notCalled === 0}
+                      type="button"
+                      onClick={() => exportNotCalledEmails(
+                        'Zara Previous Day',
+                        zaraPreviousDayCalling.notCalledRows,
+                      )}
+                    >
+                      Export
+                    </button>
+                    <strong>
+                      {zaraPreviousDayCalling.totalAppointments}
+                      <span> of {scheduleRows.length}</span>
+                    </strong>
+                  </div>
+                </div>
+                <div className="agent-confirmed-bar" title={`${zaraPreviousDayCalling.totalAppointments} of ${scheduleRows.length} appointments`}>
+                  <span style={{ width: `${zaraPreviousDayCalling.confirmedShare}%` }} />
+                </div>
+                <div className="agent-assignment-table" role="table" aria-label="Zara previous day calling by agent">
+                  <div className="agent-assignment-row heading" role="row">
+                    <span role="columnheader">Agent</span>
+                    <span role="columnheader">Total Appt. / Agent</span>
+                    <span role="columnheader">Not Called</span>
+                    <span role="columnheader">OBS</span>
+                  </div>
+                  {zaraPreviousDayCalling.meetingHosts.map((meetingHost) => (
+                    <div className="agent-assignment-row" role="row" key={meetingHost.meetingHostName}>
+                      <span role="cell" title={meetingHost.meetingHostName}>{meetingHost.meetingHostName}</span>
+                      <strong role="cell">{meetingHost.totalAppointments}</strong>
+                      <strong role="cell">
+                        <button
+                          className="not-called-count-button"
+                          disabled={meetingHost.notCalled === 0}
+                          type="button"
+                          onClick={() => openNotCalledDialog(
+                            `${meetingHost.meetingHostName} - Previous Day Not Called`,
+                            meetingHost.notCalledRows,
+                          )}
+                        >
+                          {meetingHost.notCalled}
+                        </button>
+                      </strong>
+                      <strong role="cell">-</strong>
+                    </div>
+                  ))}
+                  <div className="agent-assignment-row total" role="row">
+                    <span role="cell">Total</span>
+                    <strong role="cell">{zaraPreviousDayCalling.totalAppointments}</strong>
+                    <strong role="cell">
+                      <button
+                        className="not-called-count-button"
+                        disabled={zaraPreviousDayCalling.notCalled === 0}
+                        type="button"
+                        onClick={() => openNotCalledDialog(
+                          'Zara Previous Day - Not Called',
+                          zaraPreviousDayCalling.notCalledRows,
+                        )}
+                      >
+                        {zaraPreviousDayCalling.notCalled}
+                      </button>
+                    </strong>
+                    <strong role="cell">-</strong>
+                  </div>
+                </div>
+              </article>
+            )}
           </div>
         </section>
       )}
