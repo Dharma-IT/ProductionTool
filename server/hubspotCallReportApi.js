@@ -2601,6 +2601,7 @@ function readPricingWords(value) {
 
 function normalizePricingText(value) {
   return normalizeMatchText(value)
+    .replace(/\bsubscriptions?\b/g, ' ')
     .replace(/\bcompounded\b/g, ' ')
     .replace(/\bcapsules\b/g, ' capsule ')
     .replace(/\binjection\b/g, ' ')
@@ -2659,6 +2660,9 @@ function scoreCatalogMatch(item, catalogItem) {
   const medicationFamilies = [
     'semaglutide',
     'tirzepatide',
+    'lipo mino',
+    'nad',
+    'ghk cu',
     'sermorelin',
     'glutathione',
     'slimboost',
@@ -2666,9 +2670,9 @@ function scoreCatalogMatch(item, catalogItem) {
   const itemMedication = medicationFamilies.find((family) => itemText.includes(family))
   const catalogMedication = medicationFamilies.find((family) => catalogItem.normalizedText.includes(family))
 
-  // A matching duration alone must never allow one medication to be priced as
-  // another (for example, Tirzepatide 2 months as Sermorelin 2 months).
-  if (itemMedication && catalogMedication && itemMedication !== catalogMedication) return 0
+  // A duration is shared by many treatment packages, so it must never make a
+  // named treatment match a different treatment (or a generic catalog item).
+  if (itemMedication && itemMedication !== catalogMedication) return 0
 
   if (catalogItem.normalizedText.includes(itemText)) score += 120
   if (productTitleText && itemText.includes(productTitleText)) score += 80
