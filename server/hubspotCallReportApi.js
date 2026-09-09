@@ -33,7 +33,7 @@ const stripeVerificationCache = new Map()
 let sheetStatusCache = null
 const currentDateCacheTtlMs = 5 * 60 * 1000
 const pastDateCacheTtlMs = 24 * 60 * 60 * 1000
-const callReportCacheVersion = 'contact-call-v12'
+const callReportCacheVersion = 'contact-call-v13'
 const inFlightReports = new Map()
 const inFlightTrackingReports = new Map()
 const reportErrors = new Map()
@@ -2022,16 +2022,31 @@ function normalizeCall(call, owners) {
 }
 
 function matchesMeeting(call, meeting) {
-  const meetingPhone = normalizePhone(meeting.phoneNumber)
+  const meetingPhones = getMeetingPhoneNumbers(meeting)
 
-  if (call.phoneNumber && meetingPhone) {
-    return call.phoneNumber.endsWith(meetingPhone.slice(-10))
+  if (call.phoneNumber && meetingPhones.length > 0) {
+    const callPhoneSuffix = call.phoneNumber.slice(-10)
+
+    return meetingPhones.some((phoneNumber) => phoneNumber.slice(-10) === callPhoneSuffix)
   }
 
   const clientName = normalizeText(meeting.clientName)
   const callTitle = normalizeText(call.callTitle)
 
   return clientName.length > 4 && callTitle.includes(clientName)
+}
+
+function getMeetingPhoneNumbers(meeting) {
+  const emailLocalPart = String(meeting.clientEmail ?? '').split('@')[0]
+  const emailPhone = /^\+?[\d\s().-]+$/.test(emailLocalPart)
+    ? normalizePhone(emailLocalPart)
+    : ''
+
+  return [...new Set([
+    normalizePhone(meeting.phoneNumber),
+    ...(meeting.matchPhoneNumbers ?? []).map(normalizePhone),
+    emailPhone.length >= 10 ? emailPhone : '',
+  ].filter((phoneNumber) => phoneNumber.length >= 10))]
 }
 
 function isPriorSameDayOutboundCall(call, scheduledAt) {
@@ -2150,9 +2165,17 @@ function buildCallCandidateIndexes(calls) {
 }
 
 function getFallbackCandidateCalls(meeting, callIndexes) {
-  const phoneSuffix = normalizePhone(meeting.phoneNumber).slice(-10)
-  if (phoneSuffix) {
-    return callIndexes.callsByPhone.get(phoneSuffix) ?? []
+  const phoneSuffixes = getMeetingPhoneNumbers(meeting).map((phoneNumber) => phoneNumber.slice(-10))
+  if (phoneSuffixes.length > 0) {
+    const candidateLookup = new Map()
+
+    phoneSuffixes.forEach((phoneSuffix) => {
+      ;(callIndexes.callsByPhone.get(phoneSuffix) ?? []).forEach((call) => {
+        candidateLookup.set(String(call.callId), call)
+      })
+    })
+
+    return sortCallsForMatching(candidateLookup.values())
   }
 
   const candidateLookup = new Map()
@@ -3203,25 +3226,29 @@ async function buildCallReport(selectedDate) {
           ...(contactDetailsByEmail.get(normalizeEmail(row.clientEmail))?.phoneNumbers ?? []),
         ],
       )]
+      const matchingRow = {
+        ...row,
+        matchPhoneNumbers: associatedPhoneNumbers,
+      }
       const contactTimelineCall = findPriorOutboundCall(row, contactCalls, {
         requireMeetingMatch: false,
         preSorted: true,
       })
-      const fallbackCandidateCalls = contactTimelineCall ? [] : getFallbackCandidateCalls(row, callIndexes)
+      const fallbackCandidateCalls = contactTimelineCall ? [] : getFallbackCandidateCalls(matchingRow, callIndexes)
       const fallbackCall = contactTimelineCall
         ? null
-        : findPriorOutboundCall(row, fallbackCandidateCalls, { preSorted: true })
+        : findPriorOutboundCall(matchingRow, fallbackCandidateCalls, { preSorted: true })
       const matchingCall = contactTimelineCall ?? fallbackCall
       const qualifyingCalls = contactTimelineCall
         ? getPriorOutboundCalls(row, contactCalls, { requireMeetingMatch: false, preSorted: true })
-        : getPriorOutboundCalls(row, fallbackCandidateCalls, { preSorted: true })
+        : getPriorOutboundCalls(matchingRow, fallbackCandidateCalls, { preSorted: true })
       const previousDayContactCalls = getPreviousDayOutboundCalls(row, contactCalls, {
         requireMeetingMatch: false,
         preSorted: true,
       })
       const previousDayFallbackCalls = previousDayContactCalls.length > 0
         ? []
-        : getPreviousDayOutboundCalls(row, getFallbackCandidateCalls(row, callIndexes), { preSorted: true })
+        : getPreviousDayOutboundCalls(matchingRow, getFallbackCandidateCalls(matchingRow, callIndexes), { preSorted: true })
       const previousDayCalls = previousDayContactCalls.length > 0
         ? previousDayContactCalls
         : previousDayFallbackCalls

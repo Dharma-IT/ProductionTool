@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as XLSX from 'xlsx'
 import { loadHubSpotCallReport } from '../services/hubspotCallReport'
 
 const reportTimeZone = 'America/New_York'
@@ -269,113 +268,6 @@ function isCancelledMeeting(value) {
   return /\bcancell?ed\b|\bcancelad[ao]\b|\bcancel/i.test(String(value ?? ''))
 }
 
-function normalizePhoneDigits(value) {
-  return String(value ?? '').replace(/\D/g, '')
-}
-
-function normalizePhoneMatchKey(value) {
-  const digits = normalizePhoneDigits(value)
-
-  return digits.length >= 10 ? digits.slice(-10) : digits
-}
-
-function getAppointmentMatchNumbers(row) {
-  const emailLocalPartDigits = normalizePhoneDigits(
-    String(row.clientEmail ?? '').split('@')[0],
-  )
-  const legacyEmailPhone = emailLocalPartDigits.length >= 10
-    ? emailLocalPartDigits
-    : ''
-
-  return [...new Set([
-    normalizePhoneMatchKey(legacyEmailPhone),
-    normalizePhoneMatchKey(row.phoneNumber),
-    ...(row.matchPhoneNumbers ?? []).map(normalizePhoneMatchKey),
-  ].filter(Boolean))]
-}
-
-function getExcelCellValue(row, columnIndex) {
-  if (!Array.isArray(row)) return ''
-
-  return row[columnIndex] ?? ''
-}
-
-function normalizeExcelHeader(value) {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-function findExcelColumnIndex(headerRow, acceptedHeaders) {
-  if (!Array.isArray(headerRow)) return -1
-
-  return headerRow.findIndex((cell) =>
-    acceptedHeaders.includes(normalizeExcelHeader(cell)),
-  )
-}
-
-function isConnectedExcelStatus(value) {
-  return /\bconnected\b|\banswered\b/i.test(String(value ?? ''))
-}
-
-function parseUploadedCallNumbers(fileBuffer) {
-  const workbook = XLSX.read(fileBuffer, {
-    cellDates: false,
-    raw: false,
-    type: 'array',
-  })
-  const firstSheetName = workbook.SheetNames[0]
-  const worksheet = workbook.Sheets[firstSheetName]
-  const rows = worksheet
-    ? XLSX.utils.sheet_to_json(worksheet, {
-      blankrows: false,
-      defval: '',
-      header: 1,
-      raw: false,
-    })
-    : []
-  const numberHeaders = [
-    'to',
-    'connected number',
-    'phone number',
-    'destination',
-    'destination number',
-    'callee',
-    'callee number',
-  ]
-  const statusHeaders = [
-    'status',
-    'call status',
-    'disposition',
-    'call disposition',
-    'outcome',
-    'call outcome',
-  ]
-  const headerRowIndex = rows.findIndex((row) =>
-    findExcelColumnIndex(row, numberHeaders) >= 0,
-  )
-  const headerRow = headerRowIndex >= 0 ? rows[headerRowIndex] : []
-  const detectedNumberColumnIndex = findExcelColumnIndex(headerRow, numberHeaders)
-  const toColumnIndex = detectedNumberColumnIndex >= 0 ? detectedNumberColumnIndex : 4
-  const statusColumnIndex = findExcelColumnIndex(headerRow, statusHeaders)
-  const dataRows = headerRowIndex >= 0 ? rows.slice(headerRowIndex + 1) : rows
-  const connectedRows = statusColumnIndex >= 0
-    ? dataRows.filter((row) =>
-      isConnectedExcelStatus(getExcelCellValue(row, statusColumnIndex)),
-    )
-    : []
-  const rowsToMatch = statusColumnIndex >= 0 && connectedRows.length > 0
-    ? connectedRows
-    : dataRows
-  const numbers = rowsToMatch
-    .map((row) => normalizePhoneMatchKey(getExcelCellValue(row, toColumnIndex)))
-    .filter(Boolean)
-
-  return new Set(numbers)
-}
-
 function HubSpotCallReport() {
   const topScrollRef = useRef(null)
   const tableScrollRef = useRef(null)
@@ -394,8 +286,6 @@ function HubSpotCallReport() {
   const [loadingElapsedMs, setLoadingElapsedMs] = useState(0)
   const [averageRuntimeMs, setAverageRuntimeMs] = useState(() => readAverageRuntimeMs())
   const [notCalledDialog, setNotCalledDialog] = useState(null)
-  const [uploadedCallNumbers, setUploadedCallNumbers] = useState(() => new Set())
-  const [uploadStatus, setUploadStatus] = useState(null)
   const [outboundAssignmentOverrides, setOutboundAssignmentOverrides] = useState(() => readOutboundAssignmentOverrides())
   const [draftOutboundAssignmentOverrides, setDraftOutboundAssignmentOverrides] = useState(() => readOutboundAssignmentOverrides())
   const averageRuntimeRef = useRef(averageRuntimeMs)
@@ -428,8 +318,6 @@ function HubSpotCallReport() {
 
     setError('')
     setLoadingElapsedMs(0)
-    setUploadedCallNumbers(new Set())
-    setUploadStatus(null)
     setSelectedDate(nextDate)
   }
 
@@ -442,8 +330,6 @@ function HubSpotCallReport() {
     setDraftOutboundAssignmentOverrides(nextOverrides)
     setStatus('loading')
     setError('')
-    setUploadedCallNumbers(new Set())
-    setUploadStatus(null)
     setLoadingStartedAt(startedAt)
     setLoadingElapsedMs(0)
 
@@ -481,10 +367,7 @@ function HubSpotCallReport() {
       const callerName = row.callerName
       const outboundExempt = Boolean(row.outboundExempt)
       const cancelled = isCancelledMeeting(meetingName)
-      const uploadedMatchedNumber = getAppointmentMatchNumbers(row)
-        .find((phoneNumber) => uploadedCallNumbers.has(phoneNumber)) ?? ''
-      const uploadedCallMatched = Boolean(uploadedMatchedNumber)
-      const resolvedCallerName = callerName || (uploadedCallMatched ? 'Uploaded Excel' : '')
+      const resolvedCallerName = callerName
 
       return {
         rowId: row.rowId,
@@ -502,11 +385,7 @@ function HubSpotCallReport() {
         scheduledAt: row.scheduledAt,
         outboundExempt,
         callerName: resolvedCallerName,
-        uploadedCallMatched,
-        qualifyingCallers: [
-          ...(row.qualifyingCallers ?? (callerName ? [callerName] : [])),
-          ...(uploadedCallMatched ? ['Uploaded Excel'] : []),
-        ],
+        qualifyingCallers: row.qualifyingCallers ?? (callerName ? [callerName] : []),
         previousDayCallerName: row.previousDayCallerName ?? '',
         previousDayCallers: row.previousDayCallers ?? [],
         previousDayConnected: Boolean(row.previousDayConnected)
@@ -515,8 +394,6 @@ function HubSpotCallReport() {
         called: resolvedCallerName ? 'Called' : outboundExempt ? 'Not Required' : 'Not Called',
         calledDetail: callerName
           ? row.calledDetail || 'Outbound caller found before the appointment'
-          : uploadedCallMatched
-            ? `Matched by uploaded Excel to number ending ${uploadedMatchedNumber.slice(-4)}`
           : outboundExempt
             ? row.calledDetail || 'Outbound call not required: meeting was created within 2 hours of the appointment'
             : row.calledDetail || 'No qualifying outbound call found',
@@ -526,11 +403,7 @@ function HubSpotCallReport() {
           : 'Meeting name does not indicate cancellation',
       }
     })
-  }, [report.rows, uploadedCallNumbers])
-
-  const uploadedMatchedAppointmentCount = useMemo(() => {
-    return scheduleRows.filter((row) => row.uploadedCallMatched).length
-  }, [scheduleRows])
+  }, [report.rows])
 
   const reportDateLabel = report.reportDate ? formatDate(report.reportDate) : ''
   const reportWeekday = report.reportDate ? formatWeekday(report.reportDate) : 'Loading'
@@ -580,7 +453,7 @@ function HubSpotCallReport() {
         agentNames: [],
       }, missingCallerName)
       const assignedCallerCalled = assignedGroup
-        ? row.uploadedCallMatched || (row.qualifyingCallers ?? []).some((callerName) =>
+        ? (row.qualifyingCallers ?? []).some((callerName) =>
           normalizePersonName(callerName) === normalizePersonName(caller.callerName),
         )
         : row.called === 'Called'
@@ -652,8 +525,7 @@ function HubSpotCallReport() {
 
       const meetingHost = agentRows.meetingHosts.get(normalizePersonName(rosterAgentName))
       const callerNames = shouldUseCurrentDayCalling ? row.qualifyingCallers : row.previousDayCallers
-      const previousDayCalledByAssignedCaller = row.uploadedCallMatched
-        || (!shouldUseCurrentDayCalling && row.previousDayConnected)
+      const previousDayCalledByAssignedCaller = (!shouldUseCurrentDayCalling && row.previousDayConnected)
         || (callerNames ?? [])
           .some((callerName) => normalizePersonName(callerName) === assignedCallerKey)
 
@@ -787,34 +659,6 @@ function HubSpotCallReport() {
     window.URL.revokeObjectURL(downloadUrl)
   }
 
-  function handleCallUpload(event) {
-    const file = event.target.files?.[0]
-
-    if (!file) return
-
-    file.arrayBuffer()
-      .then((fileBuffer) => {
-        const numbers = parseUploadedCallNumbers(fileBuffer)
-
-        setUploadedCallNumbers(numbers)
-        setUploadStatus({
-          fileName: file.name,
-          numberCount: numbers.size,
-        })
-      })
-      .catch((uploadError) => {
-        setUploadedCallNumbers(new Set())
-        setUploadStatus({
-          error: uploadError.message || 'Unable to read the uploaded Excel file.',
-          fileName: file.name,
-          numberCount: 0,
-        })
-      })
-      .finally(() => {
-        event.target.value = ''
-      })
-  }
-
   return (
     <section className="route-view" aria-label="Daily appointments">
       <div className="report-toolbar">
@@ -914,24 +758,7 @@ function HubSpotCallReport() {
             >
               Refresh Live
             </button>
-            <label className="call-upload-button">
-              Upload Excel
-              <input
-                accept=".xlsx,.xls,.csv"
-                aria-label="Upload Excel call report"
-                disabled={status === 'loading' || scheduleRows.length === 0}
-                type="file"
-                onChange={handleCallUpload}
-              />
-            </label>
           </div>
-          {uploadStatus && (
-            <div className={`call-upload-status ${uploadStatus.error ? 'error' : ''}`}>
-              {uploadStatus.error
-                ? uploadStatus.error
-                : `${uploadStatus.fileName}: ${uploadedMatchedAppointmentCount} appointment${uploadedMatchedAppointmentCount === 1 ? '' : 's'} matched from ${uploadStatus.numberCount} uploaded number${uploadStatus.numberCount === 1 ? '' : 's'}.`}
-            </div>
-          )}
           <div className="analytics-summary-grid">
             <div className="analytics-total-card appointments">
               <span>Appointments</span>
@@ -955,14 +782,6 @@ function HubSpotCallReport() {
               <small>Confirmed appointments called before the appointment</small>
               <div className="metric-rail" aria-hidden="true">
                 <span style={{ width: `${confirmedCalledRate}%` }} />
-              </div>
-            </div>
-            <div className="analytics-total-card bot-calls">
-              <span>Bot Calls</span>
-              <strong>{uploadedCallNumbers.size}</strong>
-              <small>Contacts in the uploaded Excel file used for cross-checking</small>
-              <div className="metric-rail" aria-hidden="true">
-                <span style={{ width: uploadedCallNumbers.size > 0 ? '100%' : '0%' }} />
               </div>
             </div>
           </div>
