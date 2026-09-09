@@ -2692,6 +2692,13 @@ function scoreCatalogMatch(item, catalogItem) {
   ]
   const itemMedication = medicationFamilies.find((family) => itemText.includes(family))
   const catalogMedication = medicationFamilies.find((family) => catalogItem.normalizedText.includes(family))
+  const itemIsGlpSupport = /\bglp 1 support\b/.test(itemText)
+  const catalogIsGlpSupport = /\bglp 1 support\b/.test(catalogItem.normalizedText)
+  const itemIsNutritionConsultation = /\bnutrition consultation\b/.test(itemText)
+  const catalogIsNutritionConsultation = /\bnutrition consultation\b/.test(catalogItem.normalizedText)
+
+  if (itemIsGlpSupport !== catalogIsGlpSupport) return 0
+  if (itemIsNutritionConsultation !== catalogIsNutritionConsultation) return 0
 
   // A duration is shared by many treatment packages, so it must never make a
   // named treatment match a different treatment (or a generic catalog item).
@@ -2731,23 +2738,49 @@ function scoreCatalogMatch(item, catalogItem) {
   return score
 }
 
+function findCatalogItem(catalog, predicate) {
+  const match = catalog.find((catalogItem) => predicate(catalogItem.normalizedText))
+
+  return match ? { ...match, score: 1000 } : null
+}
+
+function findStrictMedicationMatch(itemText, item, catalog) {
+  const durationMonths = readDurationMonths(item.name)
+  const family = ['semaglutide', 'tirzepatide', 'lipo mino', 'nad', 'ghk cu', 'sermorelin', 'glutathione']
+    .find((name) => itemText.includes(name))
+
+  if (!family || !durationMonths) return null
+
+  return findCatalogItem(catalog, (catalogText) => {
+    if (!catalogText.includes(family) || readDurationMonths(catalogText) !== durationMonths) return false
+
+    if (family === 'semaglutide' || family === 'tirzepatide') {
+      const itemIsMicrodose = itemText.includes('microdose')
+      const itemIsStarter = itemText.includes('starter') || [3, 6, 12].includes(durationMonths)
+      const catalogIsMicrodose = catalogText.includes('microdose')
+      const catalogIsStarter = catalogText.includes('starter')
+
+      if (itemIsMicrodose) return catalogIsMicrodose
+      if (itemIsStarter) return catalogIsStarter
+
+      return !catalogIsMicrodose && !catalogIsStarter
+    }
+
+    return true
+  })
+}
+
 function findBestCatalogMatch(item, catalog) {
   const itemText = normalizePricingText(item.name)
 
   // "GLP-1 Support" is the supplement name. Do not let the GLP-1 token
   // fuzzy-match the separate "Non GLP-1 Clients" consultation product.
   if (/\bglp\s*1\s+support\b/.test(itemText)) {
-    const supplementMatch = catalog.find((catalogItem) =>
-      /\bglp\s*1\s+support\b/.test(catalogItem.normalizedText),
-    )
-
-    if (supplementMatch) {
-      return {
-        ...supplementMatch,
-        score: 1000,
-      }
-    }
+    return findCatalogItem(catalog, (catalogText) => /\bglp\s*1\s+support\b/.test(catalogText))
   }
+
+  const strictMedicationMatch = findStrictMedicationMatch(itemText, item, catalog)
+  if (strictMedicationMatch) return strictMedicationMatch
 
   const scoredMatches = catalog
     .map((catalogItem) => ({
