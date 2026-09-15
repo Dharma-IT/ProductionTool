@@ -63,6 +63,7 @@ function getTrackingStatusClass(value) {
 function getStatusSourceLabel(value) {
   if (value === 'usps') return 'Updated from USPS tracking'
   if (value === 'shopify') return 'Updated from Shopify fulfillment status'
+  if (value === 'manual') return 'Manually marked delivered'
 
   return 'Updated from Google Sheet'
 }

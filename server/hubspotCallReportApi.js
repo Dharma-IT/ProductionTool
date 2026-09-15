@@ -16,6 +16,10 @@ const supabaseTrackingTable = process.env.SUPABASE_TRACKING_TABLE ?? 'tracking_d
 const supabasePaymentHistoryTable = process.env.SUPABASE_PAYMENT_HISTORY_TABLE ?? 'payment_history'
 const excludedTrackingOrderNumbers = readExcludedTrackingOrderNumbers()
 const overdueDaysThreshold = 5
+const manuallyDeliveredTrackingOrders = new Set([
+  '#5679', '#5764', '#5765', '#5766', '#5768', '#5769',
+  '#5773', '#5775', '#5776', '#5777', '#5780',
+].map(normalizeTrackingOrderKey))
 const connectedDispositionId = 'f240bbac-87c9-4f6e-bf70-924b57d47db7'
 const defaultAllowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173']
 const reportTimeZone = process.env.HUBSPOT_REPORT_TIMEZONE ?? 'America/New_York'
@@ -1601,6 +1605,17 @@ function applyDetoxTeaShippingConfirmationStatus(row) {
   }
 }
 
+function applyManualDeliveredStatus(row) {
+  if (!manuallyDeliveredTrackingOrders.has(normalizeTrackingOrderKey(row.orderNumber))) return row
+
+  return {
+    ...row,
+    status: 'Delivered',
+    statusSource: 'manual',
+    observation: 'Manually marked delivered',
+  }
+}
+
 function applyUspsStatus(row, uspsTrackingLookup) {
   const trackingNumbers = String(row.tracking ?? '')
     .split(',')
@@ -1693,6 +1708,7 @@ async function buildShopifyTrackingReport(options = {}) {
   const rowsWithSheetStatus = rows.map((row) => applySheetStatus(row, sheetStatusLookup))
   const rowsWithDetoxTeaShippingConfirmationStatus = rowsWithSheetStatus
     .map((row) => applyDetoxTeaShippingConfirmationStatus(row))
+    .map((row) => applyManualDeliveredStatus(row))
   const uspsTrackingNumbers = rowsWithDetoxTeaShippingConfirmationStatus
     .filter((row) => !isDeliveredStatus(row.status))
     .flatMap((row) => String(row.tracking ?? '').split(','))
