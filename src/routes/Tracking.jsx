@@ -430,10 +430,6 @@ function Tracking() {
       </nav>
 
       {activeStatus === 'error' && <div className="report-alert">{activeError}</div>}
-      {activeStatus !== 'error' && activeReport.uspsTrackingError && (
-        <div className="report-alert">USPS tracking unavailable; showing Shopify fallback statuses.</div>
-      )}
-
       {activeStatus !== 'loading' && (
         <section className="tracking-analytics" aria-label="Tracking analytics">
           <div className="tracking-analytics-hero">
