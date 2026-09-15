@@ -47,6 +47,8 @@ let lastHubspotRequestAt = 0
 let hubspotRequestQueue = Promise.resolve()
 let shopifyAccessTokenCache = null
 let shopifyAccessTokenRequest = null
+let uspsAccessTokenCache = null
+let uspsAccessTokenRequest = null
 
 const allowedOrigins = readAllowedOrigins()
 
@@ -494,32 +496,6 @@ function isRefundedOrCancelledShopifyOrder(order) {
   return Boolean(order?.cancelled_at)
     || financialStatus === 'refunded'
     || financialStatus === 'partially_refunded'
-}
-
-function escapeXml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-}
-
-function decodeXml(value) {
-  return String(value ?? '')
-    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, '$1')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&gt;/g, '>')
-    .replace(/&lt;/g, '<')
-    .replace(/&amp;/g, '&')
-    .trim()
-}
-
-function readXmlTag(xml, tagName) {
-  const match = String(xml ?? '').match(new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'))
-
-  return decodeXml(match?.[1] ?? '')
 }
 
 function isCancelledMeeting(value) {
@@ -1255,47 +1231,76 @@ function parseUspsDate(value) {
   }).format(date)
 }
 
-function parseUspsTrackResponse(xml) {
-  const lookup = new Map()
-  const trackInfoPattern = /<TrackInfo\b([^>]*)>([\s\S]*?)<\/TrackInfo>/gi
-  let match
+async function getUspsAccessToken() {
+  const consumerKey = process.env.USPS_CONSUMER_KEY
+  const consumerSecret = process.env.USPS_CONSUMER_SECRET
 
-  while ((match = trackInfoPattern.exec(xml))) {
-    const id = normalizeTrackingNumber(match[1].match(/\bID="([^"]+)"/i)?.[1] ?? '')
-    const body = match[2]
-    const errorDescription = readXmlTag(body, 'Description')
-    const event = readXmlTag(body, 'Event')
-    const eventDate = readXmlTag(body, 'EventDate')
-    const eventTime = readXmlTag(body, 'EventTime')
-    const eventCity = readXmlTag(body, 'EventCity')
-    const eventState = readXmlTag(body, 'EventState')
-    const summary = readXmlTag(body, 'TrackSummary') || [event, eventCity, eventState].filter(Boolean).join(', ')
-    const status = errorDescription
-      ? ''
-      : normalizeUspsDashboardStatus(summary, event)
+  if (!consumerKey || !consumerSecret) return ''
+  if (uspsAccessTokenCache && Date.now() < uspsAccessTokenCache.expiresAt) {
+    return uspsAccessTokenCache.accessToken
+  }
+  if (uspsAccessTokenRequest) return uspsAccessTokenRequest
 
-    if (!id) continue
+  uspsAccessTokenRequest = fetch('https://apis.usps.com/oauth2/v3/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: consumerKey,
+      client_secret: consumerSecret,
+      grant_type: 'client_credentials',
+    }),
+  }).then(async (response) => {
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || !payload.access_token) {
+      throw new Error(`USPS OAuth request failed (${response.status}): ${payload.error?.message ?? 'No access token returned'}`)
+    }
 
-    lookup.set(id, {
+    uspsAccessTokenCache = {
+      accessToken: payload.access_token,
+      expiresAt: Date.now() + Math.max(60, Number(payload.expires_in) || 28_800) * 1000 - 5 * 60 * 1000,
+    }
+    return uspsAccessTokenCache.accessToken
+  }).finally(() => {
+    uspsAccessTokenRequest = null
+  })
+
+  return uspsAccessTokenRequest
+}
+
+function parseModernUspsTrackingRecord(record) {
+  const trackingNumber = normalizeTrackingNumber(record?.trackingNumber)
+  if (!trackingNumber) return null
+
+  const events = Array.isArray(record.trackingEvents) ? record.trackingEvents : []
+  const latestEvent = events[0] ?? {}
+  const event = latestEvent.eventType ?? record.status ?? ''
+  const summary = record.statusSummary ?? event
+  const status = normalizeUspsDashboardStatus(summary, event)
+  const deliveredEvent = status === 'Delivered'
+    ? events.find((trackingEvent) => normalizeMatchText(trackingEvent.eventType).includes('delivered')) ?? latestEvent
+    : null
+
+  return {
+    trackingNumber,
+    payload: {
       status,
-      deliveryDate: status === 'Delivered' ? parseUspsDate(eventDate) : '',
+      deliveryDate: deliveredEvent ? parseUspsDate(deliveredEvent.eventTimestamp) : '',
       observation: summary,
       uspsEvent: event,
-      uspsEventDate: eventDate,
-      uspsEventTime: eventTime,
-      uspsError: errorDescription,
-    })
+      uspsEventDate: latestEvent.eventTimestamp ?? '',
+      uspsEventTime: latestEvent.eventTimestamp ?? '',
+      uspsError: '',
+    },
   }
-
-  return lookup
 }
 
 async function loadUspsTrackingStatuses(trackingNumbers) {
-  const userId = process.env.USPS_WEBTOOLS_USER_ID
+  const consumerKey = process.env.USPS_CONSUMER_KEY
+  const consumerSecret = process.env.USPS_CONSUMER_SECRET
   const enabled = process.env.USPS_TRACKING_ENABLED !== '0'
   const normalizedTrackingNumbers = [...new Set(trackingNumbers.map(normalizeTrackingNumber).filter(Boolean))]
 
-  if (!enabled || !userId || normalizedTrackingNumbers.length === 0) {
+  if (!enabled || !consumerKey || !consumerSecret || normalizedTrackingNumbers.length === 0) {
     return new Map()
   }
 
@@ -1313,22 +1318,27 @@ async function loadUspsTrackingStatuses(trackingNumbers) {
     numbersToFetch.push(trackingNumber)
   })
 
+  const accessToken = await getUspsAccessToken()
+
   for (let index = 0; index < numbersToFetch.length; index += 35) {
     const batch = numbersToFetch.slice(index, index + 35)
-    const trackIds = batch
-      .map((trackingNumber) => `<TrackID ID="${escapeXml(trackingNumber)}"></TrackID>`)
-      .join('')
-    const xml = `<TrackRequest USERID="${escapeXml(userId)}">${trackIds}</TrackRequest>`
-    const requestUrl = `https://secure.shippingapis.com/ShippingAPI.dll?API=TrackV2&XML=${encodeURIComponent(xml)}`
-    const response = await fetch(requestUrl)
+    const response = await fetch('https://apis.usps.com/tracking/v3r2/tracking', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(batch.map((trackingNumber) => ({ trackingNumber }))),
+    })
 
     if (!response.ok) {
-      throw new Error(`USPS tracking request failed (${response.status})`)
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(`USPS tracking request failed (${response.status}): ${payload.error?.message ?? 'Unknown USPS error'}`)
     }
 
-    const batchLookup = parseUspsTrackResponse(await response.text())
-
-    batchLookup.forEach((payload, trackingNumber) => {
+    const responsePayload = await response.json()
+    const records = Array.isArray(responsePayload) ? responsePayload : [responsePayload]
+    records.map(parseModernUspsTrackingRecord).filter(Boolean).forEach(({ trackingNumber, payload }) => {
       uspsTrackingCache.set(trackingNumber, {
         cachedAt: Date.now(),
         payload,
@@ -1686,7 +1696,14 @@ async function buildShopifyTrackingReport(options = {}) {
   const uspsTrackingNumbers = rowsWithDetoxTeaShippingConfirmationStatus
     .filter((row) => !isDeliveredStatus(row.status))
     .flatMap((row) => String(row.tracking ?? '').split(','))
-  const uspsTrackingLookup = await loadUspsTrackingStatuses(uspsTrackingNumbers)
+  let uspsTrackingLookup = new Map()
+  let uspsTrackingError = ''
+
+  try {
+    uspsTrackingLookup = await loadUspsTrackingStatuses(uspsTrackingNumbers)
+  } catch (error) {
+    uspsTrackingError = error.message
+  }
   const rowsWithStatuses = rowsWithDetoxTeaShippingConfirmationStatus.map((row) => applyUspsStatus(row, uspsTrackingLookup))
   const rowsWithStatusCount = rowsWithStatuses.filter((row) => row.status).length
   const rowsWithUspsStatusCount = rowsWithStatuses.filter((row) => row.statusSource === 'usps').length
@@ -1735,7 +1752,9 @@ async function buildShopifyTrackingReport(options = {}) {
     rowsWithUspsStatusCount,
     rowsWithShopifyStatusCount,
     rowsWithDeliveryDateCount,
-    uspsTrackingEnabled: Boolean(process.env.USPS_WEBTOOLS_USER_ID) && process.env.USPS_TRACKING_ENABLED !== '0',
+    uspsTrackingError,
+    uspsTrackingEnabled: Boolean(process.env.USPS_CONSUMER_KEY && process.env.USPS_CONSUMER_SECRET)
+      && process.env.USPS_TRACKING_ENABLED !== '0',
     databaseSynced,
     databaseRows: responseRows.length,
     databaseError,

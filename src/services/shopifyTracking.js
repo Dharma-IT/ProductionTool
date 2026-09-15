@@ -132,6 +132,7 @@ export async function loadShopifyTracking(options = {}) {
     rowsWithShopifyStatusCount: payload.rowsWithShopifyStatusCount ?? 0,
     rowsWithDeliveryDateCount: payload.rowsWithDeliveryDateCount ?? 0,
     uspsTrackingEnabled: Boolean(payload.uspsTrackingEnabled),
+    uspsTrackingError: payload.uspsTrackingError ?? '',
     rowsLimit: payload.rowsLimit ?? options.rowsLimit ?? defaultRowsLimit,
     rowsOffset: payload.rowsOffset ?? options.rowsOffset ?? 0,
     hasMoreRows: Boolean(payload.hasMoreRows),
