@@ -530,6 +530,29 @@
   margin: 0 auto 16px;
 }
 
+.tracking-export-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tracking-export-actions label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted-text);
+}
+
+.tracking-export-actions select {
+  min-height: 36px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
 .tracking-view-tabs button {
   min-width: 180px;
 }

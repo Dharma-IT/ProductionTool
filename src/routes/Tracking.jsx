@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { loadShopifyTracking } from '../services/shopifyTracking'
 
 const trackingHeaders = [
@@ -23,6 +24,19 @@ const trackingBusinessDateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'numeric',
   day: 'numeric',
 })
+
+const trackingExportFields = [
+  ['Order Number', 'orderNumber'],
+  ['Supliful Order', 'suplifulOrder'],
+  ['Item', 'item'],
+  ['Name', 'name'],
+  ['Phone', 'phone'],
+  ['Date', 'date'],
+  ['Date shipped', 'dateShipped'],
+  ['Tracking', 'tracking'],
+  ['Delivery Date', 'deliveryDate'],
+  ['Status', 'status'],
+]
 
 function displayCell(value) {
   return value || '-'
@@ -232,6 +246,7 @@ function Tracking() {
   const [historyStatus, setHistoryStatus] = useState('idle')
   const [error, setError] = useState('')
   const [historyError, setHistoryError] = useState('')
+  const [exportFormat, setExportFormat] = useState('xlsx')
   const historyRowsOffset = (historyPageIndex + 1) * trackingRowsPageSize
   const activeReport = activeTrackingView === 'history' ? historyReport : report
   const activeStatus = activeTrackingView === 'history' ? historyStatus : status
@@ -380,6 +395,35 @@ function Tracking() {
     }
   }, [activeReport.rows])
 
+  function exportDeliveryRisks() {
+    if (analytics.overdueOrders.length === 0) return
+
+    const exportRows = analytics.overdueOrders.map((row) => Object.fromEntries(
+      trackingExportFields.map(([header, field]) => [header, row[field] ?? '']),
+    ))
+    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: trackingHeaders })
+    const dateStamp = new Date().toISOString().slice(0, 10)
+
+    if (exportFormat === 'csv') {
+      const csv = XLSX.utils.sheet_to_csv(worksheet)
+      const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+
+      link.href = url
+      link.download = `delivery-risks-${dateStamp}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      return
+    }
+
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Delivery Risks')
+    XLSX.writeFile(workbook, `delivery-risks-${dateStamp}.xlsx`)
+  }
+
   return (
     <section className="route-view" aria-label="Tracking dashboard">
       <div className="report-toolbar">
@@ -408,6 +452,25 @@ function Tracking() {
         >
           Refresh Live
         </button>
+        <div className="tracking-export-actions">
+          <label htmlFor="tracking-export-format">Export delivery risks as</label>
+          <select
+            id="tracking-export-format"
+            value={exportFormat}
+            onChange={(event) => setExportFormat(event.target.value)}
+          >
+            <option value="xlsx">Excel (.xlsx)</option>
+            <option value="csv">CSV (.csv)</option>
+          </select>
+          <button
+            className="filter-button"
+            disabled={activeStatus === 'loading' || analytics.overdueOrders.length === 0}
+            type="button"
+            onClick={exportDeliveryRisks}
+          >
+            Export ({analytics.overdueOrders.length})
+          </button>
+        </div>
       </div>
 
       <nav className="home-view-tabs tracking-view-tabs" aria-label="Tracking views">
