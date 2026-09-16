@@ -26,7 +26,7 @@ const outboundCallerAssignments = [
   },
   {
     id: 'zara-main',
-    ownerName: 'Zara Meza',
+    ownerName: 'Belizabett Gonzalez',
     agentNames: [
       'Alice F',
       'Alice Strelow',
@@ -65,6 +65,7 @@ function getDisplayPersonName(value) {
   const normalizedName = normalizePersonName(value)
 
   if (normalizedName === 'laura sanchez') return 'Laura Sanchez'
+  if (normalizedName === 'belizabett gonzales') return 'Belizabett Gonzalez'
   if (normalizedName === 'maria claudia') return 'María Claudia'
   if (normalizedName === 'alice strelow') return 'Alice F'
   if (normalizedName === 'edmilson morales') return 'Edmilson Velasquez'
