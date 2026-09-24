@@ -28,6 +28,7 @@ const outboundCallerAssignments = [
     id: 'zara-main',
     ownerName: 'Belizabett Gonzalez',
     agentNames: [
+      'Alejandra Oyala',
       'Alice F',
       'Alice Strelow',
       'Arles Martinez',
