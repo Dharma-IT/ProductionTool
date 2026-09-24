@@ -7,6 +7,7 @@ const averageRuntimeCacheKey = 'hubspot-call-report-average-runtime-ms'
 const outboundAssignmentStorageKey = 'hubspot-call-report-outbound-assignments'
 const missingCallerName = 'No caller found'
 const additionalOutboundCallerNames = ['Zara Meza']
+const alwaysVisibleMeetingHosts = new Set(['alejandra oyala'])
 const outboundCallerAssignments = [
   {
     id: 'laura-main',
@@ -489,7 +490,10 @@ function HubSpotCallReport() {
       .map((agent) => ({
         ...agent,
         meetingHosts: [...agent.meetingHosts.values()]
-          .filter((meetingHost) => meetingHost.totalAppointments > 0)
+          .filter((meetingHost) =>
+            meetingHost.totalAppointments > 0
+            || alwaysVisibleMeetingHosts.has(normalizePersonName(meetingHost.meetingHostName)),
+          )
           .sort((left, right) =>
             right.totalAppointments - left.totalAppointments
             || right.confirmedCalled - left.confirmedCalled
