@@ -23,13 +23,13 @@ const outboundCallerAssignments = [
       'Erika Vargas',
       'Ailin Isabel',
       'MarÃ­a Claudia',
+      'Alejandra Oyala',
     ],
   },
   {
     id: 'zara-main',
     ownerName: 'Belizabett Gonzalez',
     agentNames: [
-      'Alejandra Oyala',
       'Alice F',
       'Alice Strelow',
       'Arles Martinez',
