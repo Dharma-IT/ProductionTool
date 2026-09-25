@@ -449,7 +449,8 @@ function HubSpotCallReport() {
 
     scheduleRows.forEach((row) => {
       const meetingHostName = row.meetingHost || 'Unassigned'
-      const assignedGroup = assignmentByAgentName.get(normalizePersonName(meetingHostName))
+      const meetingHostKey = normalizePersonName(meetingHostName)
+      const assignedGroup = assignmentByAgentName.get(meetingHostKey)
       const caller = assignedGroup ?? unassignedRows.get(missingCallerName) ?? createEmptyAssignmentStats({
         id: 'unassigned',
         ownerName: missingCallerName,
@@ -460,7 +461,7 @@ function HubSpotCallReport() {
           normalizePersonName(callerName) === normalizePersonName(caller.callerName),
         )
         : row.called === 'Called'
-      const meetingHost = caller.meetingHosts.get(meetingHostName) ?? {
+      const meetingHost = caller.meetingHosts.get(meetingHostKey) ?? {
         meetingHostName,
         totalAppointments: 0,
         confirmedCalled: 0,
@@ -480,7 +481,7 @@ function HubSpotCallReport() {
         meetingHost.confirmedCalled += 1
       }
 
-      caller.meetingHosts.set(meetingHostName, meetingHost)
+      caller.meetingHosts.set(meetingHostKey, meetingHost)
       if (!assignedGroup) {
         unassignedRows.set(missingCallerName, caller)
       }
