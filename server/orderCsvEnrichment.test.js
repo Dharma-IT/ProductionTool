@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   buildOrderCsvLookup,
   enrichHubSpotOrders,
+  expandHubSpotOrderItems,
   validateOrderCsvHeaders,
 } from '../src/services/orderCsvEnrichment.js'
 
@@ -88,4 +89,27 @@ test('reports missing required headers', () => {
   assert.deepEqual(validateOrderCsvHeaders(['firstName', 'lastName']), [
     'phone', 'formattedAddress', 'street', 'street2', 'city', 'state', 'zip', 'purchase',
   ])
+})
+
+test('expands distinct products and keeps quantities on the matching name', () => {
+  const expanded = expandHubSpotOrderItems([order({
+    clientName: 'Norma Thorne (7)',
+    treatment: '1x Personalized Nutrition Consultation, 1x Compounded Tirzepatide 52mg, 5x Subscription GLP-1 Support',
+  })])
+
+  assert.deepEqual(expanded.map(({ clientName, treatment }) => ({ clientName, treatment })), [
+    { clientName: 'Norma Thorne', treatment: '1x Personalized Nutrition Consultation' },
+    { clientName: 'Norma Thorne', treatment: '1x Compounded Tirzepatide 52mg' },
+    { clientName: 'Norma Thorne (5)', treatment: '5x Subscription GLP-1 Support' },
+  ])
+})
+
+test('combines repeated identical products into one product row', () => {
+  const expanded = expandHubSpotOrderItems([order({
+    treatment: '2x GLP-1 Support, 3x GLP-1 Support',
+  })])
+
+  assert.equal(expanded.length, 1)
+  assert.equal(expanded[0].clientName, 'Jeuz Vinci (5)')
+  assert.equal(expanded[0].treatment, '5x GLP-1 Support')
 })

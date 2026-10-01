@@ -79,6 +79,39 @@ export function validateOrderCsvHeaders(headers) {
   return requiredOrderCsvHeaders.filter((header) => !headers.includes(header))
 }
 
+function readTreatmentItems(treatment) {
+  const value = cleanCsvValue(treatment)
+  const matches = [...value.matchAll(/(\d+)\s*x\s+(.+?)(?=,\s*\d+\s*x\s+|$)/gi)]
+  if (!matches.length) return [{ quantity: 1, product: value }]
+
+  const itemsByProduct = new Map()
+  matches.forEach((match) => {
+    const quantity = Number(match[1])
+    const product = cleanCsvValue(match[2])
+    const key = product.toLowerCase().replace(/\s+/g, ' ')
+    const existing = itemsByProduct.get(key)
+    itemsByProduct.set(key, {
+      quantity: (existing?.quantity ?? 0) + quantity,
+      product: existing?.product ?? product,
+    })
+  })
+
+  return [...itemsByProduct.values()]
+}
+
+export function expandHubSpotOrderItems(orders) {
+  return orders.flatMap((order) => {
+    const baseName = cleanCsvValue(order.clientName).replace(/\s*\(\d+\)\s*$/, '')
+
+    return readTreatmentItems(order.treatment).map((item, index) => ({
+      ...order,
+      id: `${order.id}:item-${index + 1}`,
+      clientName: `${baseName}${item.quantity > 1 ? ` (${item.quantity})` : ''}`,
+      treatment: item.product ? `${item.quantity}x ${item.product}` : '',
+    }))
+  })
+}
+
 export function buildOrderCsvLookup(csvRows) {
   const byPhone = new Map()
   const byName = new Map()

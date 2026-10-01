@@ -4,6 +4,7 @@ import { loadHubSpotOrders } from '../services/hubspotOrders'
 import {
   buildOrderCsvLookup,
   enrichHubSpotOrders,
+  expandHubSpotOrderItems,
   validateOrderCsvHeaders,
 } from '../services/orderCsvEnrichment'
 
@@ -74,7 +75,7 @@ function Orders() {
     loadHubSpotOrders(request.date)
       .then((report) => {
         if (!active) return
-        setRows(report.rows ?? [])
+        setRows(expandHubSpotOrderItems(report.rows ?? []))
         setStatus('ready')
       })
       .catch((loadError) => {
@@ -146,7 +147,7 @@ function Orders() {
         <button className="filter-button" disabled={!selectedDate || status === 'loading'} type="submit">
           {status === 'loading' ? 'Loading…' : 'Load orders'}
         </button>
-        {status === 'ready' && <span className="timezone-pill">{rows.length} orders</span>}
+        {status === 'ready' && <span className="timezone-pill">{rows.length} product rows</span>}
         <label className="filter-button orders-upload-button">
           Upload customer CSV
           <input accept=".csv,text/csv" onChange={uploadCsv} type="file" />
