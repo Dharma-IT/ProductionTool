@@ -486,6 +486,69 @@
   text-align: center;
 }
 
+.orders-table th:first-child,
+.orders-table td:first-child {
+  width: 170px;
+  min-width: 170px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.orders-treatment-pill,
+.orders-status-pill {
+  display: block;
+  width: 100%;
+  border-radius: 999px;
+  text-align: center;
+}
+
+.orders-treatment-pill {
+  padding: 3px 10px;
+  overflow: hidden;
+  background: var(--treatment-color, #e3e5e8);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orders-status-pill {
+  padding: 3px 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.orders-status-pill.yes,
+.orders-status-select.yes {
+  color: #176b36;
+  background: #d8efc5;
+}
+
+.orders-status-pill.pending,
+.orders-status-select.pending {
+  color: #8a5b00;
+  background: #ffedb8;
+}
+
+.orders-status-select.no {
+  color: #9c2929;
+  background: #ffd4cf;
+}
+
+.orders-status-select {
+  width: 100%;
+  min-width: 126px;
+  padding: 4px 28px 4px 10px;
+  border: 1px solid rgba(0, 86, 63, 0.16);
+  border-radius: 999px;
+  color: var(--muted);
+  background-color: #f2f3f3;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
 .orders-upload-button {
   display: inline-flex;
   align-items: center;

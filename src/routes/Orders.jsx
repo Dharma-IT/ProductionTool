@@ -37,6 +37,11 @@ const orderHeaders = [
   { key: 'seller', label: 'Seller' },
 ]
 
+const treatmentColors = [
+  '#ead7f5', '#dce8f7', '#ffe8ad', '#ffd3ce', '#dcece3',
+  '#e3e5e8', '#d9ecff', '#f8dbec', '#e5e0ff', '#dff0c9',
+]
+
 function todayIsoDate() {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -62,12 +67,23 @@ function Orders() {
   const [csvLookup, setCsvLookup] = useState(null)
   const [csvFileName, setCsvFileName] = useState('')
   const [csvError, setCsvError] = useState('')
+  const [doctorStatuses, setDoctorStatuses] = useState({})
 
   const enrichment = useMemo(
     () => csvLookup ? enrichHubSpotOrders(rows, csvLookup) : { rows, matchedCount: 0 },
     [csvLookup, rows],
   )
   const displayedRows = enrichment.rows
+  const treatmentColorLookup = useMemo(() => {
+    const lookup = new Map()
+    displayedRows.forEach((row) => {
+      const treatment = String(row.treatment ?? '').replace(/^\d+x\s+/i, '').trim()
+      if (treatment && !lookup.has(treatment)) {
+        lookup.set(treatment, treatmentColors[lookup.size % treatmentColors.length])
+      }
+    })
+    return lookup
+  }, [displayedRows])
 
   useEffect(() => {
     let active = true
@@ -126,6 +142,51 @@ function Orders() {
     }
   }
 
+  function updateDoctorStatus(rowId, value) {
+    setDoctorStatuses((current) => ({ ...current, [rowId]: value }))
+  }
+
+  function renderOrderCell(row, header) {
+    if (header.key === 'treatment') {
+      const treatmentName = String(row.treatment ?? '').replace(/^\d+x\s+/i, '').trim()
+      return (
+        <span
+          className="orders-treatment-pill"
+          style={{ '--treatment-color': treatmentColorLookup.get(treatmentName) }}
+          title={displayCell(row, header.key)}
+        >
+          {displayCell(row, header.key)}
+        </span>
+      )
+    }
+
+    if (header.key === 'medicalForm') {
+      const statusValue = displayCell(row, header.key)
+      return statusValue
+        ? <span className={`orders-status-pill ${statusValue.toLowerCase()}`}>{statusValue}</span>
+        : ''
+    }
+
+    if (header.key === 'doctorPrescribed') {
+      const selectedStatus = doctorStatuses[row.id] ?? ''
+      return (
+        <select
+          aria-label={`Doctor prescribed status for ${row.clientName}`}
+          className={`orders-status-select ${selectedStatus.toLowerCase()}`}
+          value={selectedStatus}
+          onChange={(event) => updateDoctorStatus(row.id, event.target.value)}
+        >
+          <option value="">Select</option>
+          <option value="Yes">Yes</option>
+          <option value="Pending">Pending</option>
+          <option value="No">No</option>
+        </select>
+      )
+    }
+
+    return displayCell(row, header.key)
+  }
+
   return (
     <section className="route-view" aria-label="Orders dashboard">
       <div className="report-toolbar">
@@ -176,7 +237,7 @@ function Orders() {
               {displayedRows.map((row) => (
                 <tr key={row.id}>
                   {orderHeaders.map((header) => (
-                    <td key={header.key}>{displayCell(row, header.key)}</td>
+                    <td key={header.key}>{renderOrderCell(row, header)}</td>
                   ))}
                 </tr>
               ))}

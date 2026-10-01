@@ -164,7 +164,7 @@ export function enrichHubSpotOrders(orders, lookup) {
       state: address.state,
       zipCode: address.zipCode,
       medicalForm: medicalStatus,
-      doctorPrescribed: medicalStatus,
+      doctorPrescribed: '',
     }
   })
 

@@ -48,7 +48,7 @@ test('matches country-code phone numbers and separates address fields', () => {
       state: 'NJ',
       zipCode: '07105',
       medicalForm: 'Yes',
-      doctorPrescribed: 'Yes',
+      doctorPrescribed: '',
     },
   )
 })
@@ -69,7 +69,7 @@ test('requires the same medical product in HubSpot and the CSV', () => {
   const result = enrichHubSpotOrders([order()], lookup)
 
   assert.equal(result.rows[0].medicalForm, 'Pending')
-  assert.equal(result.rows[0].doctorPrescribed, 'Pending')
+  assert.equal(result.rows[0].doctorPrescribed, '')
 })
 
 test('leaves non-medical products blank and removes null-like address values', () => {
