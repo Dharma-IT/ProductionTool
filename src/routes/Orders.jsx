@@ -328,7 +328,6 @@ function Orders() {
             <div className="orders-warning-icon" aria-hidden="true">!</div>
             <span className="orders-lock-kicker">Restricted preview</span>
             <h2 id="orders-lock-title">Under Construction</h2>
-            <p>This order workspace is still being prepared. Authorized team access only.</p>
             <div className="orders-pin-inputs" aria-label="Four digit access code">
               {pinDigits.map((digit, index) => (
                 <input
