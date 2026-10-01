@@ -53,6 +53,7 @@ let shopifyAccessTokenCache = null
 let shopifyAccessTokenRequest = null
 let uspsAccessTokenCache = null
 let uspsAccessTokenRequest = null
+let dealPropertyDefinitionsCache = null
 
 const allowedOrigins = readAllowedOrigins()
 
@@ -1945,6 +1946,162 @@ async function loadContactIdsByCallId(callIds) {
   return contactIdsByCallId
 }
 
+function normalizePropertyLabel(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+async function loadDealPropertyDefinitions() {
+  if (dealPropertyDefinitionsCache) return dealPropertyDefinitionsCache
+
+  try {
+    const payload = await hubspotFetch('/crm/v3/properties/deals')
+    dealPropertyDefinitionsCache = payload.results ?? []
+    return dealPropertyDefinitionsCache
+  } catch (error) {
+    if (/403|permission|scope/i.test(error.message)) {
+      throw new Error('The HubSpot private app needs the crm.objects.deals.read scope before Orders can be loaded.', {
+        cause: error,
+      })
+    }
+    throw error
+  }
+}
+
+function findDealProperty(definitions, labels, fallbackNames = []) {
+  const normalizedLabels = labels.map(normalizePropertyLabel)
+  const exactLabelMatch = definitions.find((property) => (
+    normalizedLabels.includes(normalizePropertyLabel(property.label))
+  ))
+  if (exactLabelMatch) return exactLabelMatch.name
+
+  const partialLabelMatch = definitions.find((property) => {
+    const label = normalizePropertyLabel(property.label)
+    return normalizedLabels.some((candidate) => label.includes(candidate))
+  })
+  if (partialLabelMatch) return partialLabelMatch.name
+
+  return fallbackNames.find((name) => definitions.some((property) => property.name === name)) ?? ''
+}
+
+async function loadAssociatedContactIdsByDealId(dealIds) {
+  const contactIdsByDealId = new Map()
+
+  for (const dealIdChunk of chunkArray(dealIds, 100)) {
+    const payload = await hubspotFetch('/crm/v4/associations/deals/contacts/batch/read', {
+      method: 'POST',
+      body: { inputs: dealIdChunk.map((id) => ({ id })) },
+    })
+
+    ;(payload.results ?? []).forEach((result) => {
+      contactIdsByDealId.set(String(result.from?.id ?? ''), (result.to ?? [])
+        .map((association) => String(association.toObjectId ?? ''))
+        .filter(Boolean))
+    })
+  }
+
+  return contactIdsByDealId
+}
+
+async function loadOrderContactsById(contactIds) {
+  const contactsById = new Map()
+  const properties = ['firstname', 'lastname', 'address', 'street_address_2', 'city', 'state', 'zip']
+
+  for (const contactIdChunk of chunkArray([...new Set(contactIds)], 100)) {
+    const payload = await hubspotFetch('/crm/v3/objects/contacts/batch/read', {
+      method: 'POST',
+      body: {
+        properties,
+        inputs: contactIdChunk.map((id) => ({ id })),
+      },
+    })
+
+    ;(payload.results ?? []).forEach((contact) => {
+      contactsById.set(String(contact.id), contact.properties ?? {})
+    })
+  }
+
+  return contactsById
+}
+
+function countItemsFromDealDescription(description) {
+  const quantities = [...String(description ?? '').matchAll(/(?:^|[,;+\s])(\d+)\s*x\b/gi)]
+    .map((match) => Number(match[1]))
+    .filter((quantity) => Number.isFinite(quantity) && quantity > 0)
+
+  return quantities.length ? quantities.reduce((total, quantity) => total + quantity, 0) : 1
+}
+
+async function buildHubSpotOrdersReport(selectedDate) {
+  const range = getReportDateRange(selectedDate)
+  const definitions = await loadDealPropertyDefinitions()
+  const paidDateProperty = findDealProperty(definitions, [
+    'Paid Date (All Pipelines)',
+    'Paid Date All Pipelines',
+    'Paid Date',
+  ], ['paid_date_all_pipelines', 'paid_date'])
+  const descriptionProperty = findDealProperty(definitions, [
+    'Deal Description (Aggregate)',
+    'Deal Description',
+  ], ['deal_description', 'description'])
+
+  if (!paidDateProperty) {
+    throw new Error('Could not find the HubSpot deal property “Paid Date (All Pipelines)”.')
+  }
+  if (!descriptionProperty) {
+    throw new Error('Could not find the HubSpot deal property “Deal Description”.')
+  }
+
+  const deals = await hubspotSearch('deals', {
+    filterGroups: [{
+      filters: [
+        { propertyName: paidDateProperty, operator: 'GTE', value: range.fromMs },
+        { propertyName: paidDateProperty, operator: 'LT', value: range.toMs },
+      ],
+    }],
+    properties: [paidDateProperty, descriptionProperty, 'hubspot_owner_id'],
+    limit: 100,
+    sorts: [paidDateProperty],
+  })
+  const dealIds = deals.map((deal) => String(deal.id))
+  const [owners, contactIdsByDealId] = await Promise.all([
+    loadOwners(),
+    loadAssociatedContactIdsByDealId(dealIds),
+  ])
+  const contactsById = await loadOrderContactsById(
+    [...contactIdsByDealId.values()].flat(),
+  )
+
+  const rows = deals.map((deal, index) => {
+    const properties = deal.properties ?? {}
+    const contactId = contactIdsByDealId.get(String(deal.id))?.[0]
+    const contact = contactsById.get(contactId) ?? {}
+    const description = properties[descriptionProperty] ?? ''
+    const itemCount = countItemsFromDealDescription(description)
+    const clientName = [contact.firstname, contact.lastname].filter(Boolean).join(' ').trim()
+
+    return {
+      id: String(deal.id),
+      number: index + 1,
+      clientName: `${clientName || 'Unknown client'}${itemCount > 1 ? ` (${itemCount})` : ''}`,
+      treatment: description,
+      purchaseDate: properties[paidDateProperty] ?? '',
+      seller: readFirstOwnerName(owners, properties.hubspot_owner_id),
+      address: [contact.address, contact.street_address_2].filter(Boolean).join(', '),
+      city: contact.city ?? '',
+      state: contact.state ?? '',
+      zipCode: contact.zip ?? '',
+    }
+  })
+
+  return {
+    source: 'hubspot',
+    reportDate: range.reportDate,
+    paidDateProperty,
+    rows,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 async function loadContactIdsByMeetingId(meetingIds) {
   const normalizedMeetingIds = [...new Set(meetingIds.map((meetingId) => String(meetingId ?? '').trim()).filter(Boolean))]
   const contactIdsByMeetingId = new Map()
@@ -3511,6 +3668,20 @@ const server = createServer(async (request, response) => {
       }, {
         'Cache-Control': 'no-store',
       })
+    } catch (error) {
+      sendJson(request, response, 500, {
+        message: error.message,
+      }, {
+        'Cache-Control': 'no-store',
+      })
+    }
+    return
+  }
+
+  if (requestUrl.pathname === '/api/hubspot/orders' && request.method === 'GET') {
+    try {
+      const report = await buildHubSpotOrdersReport(requestUrl.searchParams.get('date'))
+      sendJson(request, response, 200, report, getApiCacheHeaders(getReportCacheTtlMs(report.reportDate)))
     } catch (error) {
       sendJson(request, response, 500, {
         message: error.message,

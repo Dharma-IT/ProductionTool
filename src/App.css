@@ -446,6 +446,46 @@
   border-right: 0;
 }
 
+.orders-panel {
+  width: 100%;
+  max-width: none;
+}
+
+.orders-table {
+  min-width: 3900px;
+}
+
+.orders-table th {
+  text-align: center;
+  white-space: normal;
+}
+
+.orders-table td {
+  max-width: 280px;
+  padding: 12px 14px;
+  border-right: 1px solid rgba(0, 86, 63, 0.1);
+  border-bottom: 1px solid rgba(0, 86, 63, 0.1);
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.orders-table tbody tr:nth-child(even) td {
+  background: rgba(237, 247, 241, 0.38);
+}
+
+.orders-table tbody tr:hover td {
+  background: #fff8e3;
+}
+
+.orders-table td:first-child,
+.orders-table td:nth-child(7) {
+  text-align: center;
+}
+
 .tracking-panel {
   width: 100%;
   max-width: none;
