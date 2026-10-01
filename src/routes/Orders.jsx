@@ -1,5 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
+import {
+  buildOrderCsvLookup,
+  enrichHubSpotOrders,
+  validateOrderCsvHeaders,
+} from '../services/orderCsvEnrichment'
 
 const orderHeaders = [
   { key: 'number', label: 'Number' },
@@ -52,6 +58,15 @@ function Orders() {
   const [rows, setRows] = useState([])
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
+  const [csvLookup, setCsvLookup] = useState(null)
+  const [csvFileName, setCsvFileName] = useState('')
+  const [csvError, setCsvError] = useState('')
+
+  const enrichment = useMemo(
+    () => csvLookup ? enrichHubSpotOrders(rows, csvLookup) : { rows, matchedCount: 0 },
+    [csvLookup, rows],
+  )
+  const displayedRows = enrichment.rows
 
   useEffect(() => {
     let active = true
@@ -81,11 +96,40 @@ function Orders() {
     setRequest((current) => ({ date: selectedDate, sequence: current.sequence + 1 }))
   }
 
+  async function uploadCsv(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setCsvError('')
+
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+      if (!worksheet) throw new Error('The CSV does not contain a readable worksheet.')
+
+      const csvRows = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+      if (!csvRows.length) throw new Error('The CSV does not contain any customer rows.')
+
+      const headers = Object.keys(csvRows[0]).map((header) => header.trim())
+      const missingHeaders = validateOrderCsvHeaders(headers)
+      if (missingHeaders.length) {
+        throw new Error(`Missing required columns: ${missingHeaders.join(', ')}`)
+      }
+
+      setCsvLookup(buildOrderCsvLookup(csvRows))
+      setCsvFileName(file.name)
+    } catch (uploadError) {
+      setCsvError(uploadError instanceof Error ? uploadError.message : 'Unable to read this CSV file.')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
   return (
     <section className="route-view" aria-label="Orders dashboard">
       <div className="report-toolbar">
         <div>
-        <h1 id="orders-title">Orders</h1>
+          <h1 id="orders-title">Orders</h1>
           <p>Order details and production workflow.</p>
         </div>
       </div>
@@ -103,9 +147,19 @@ function Orders() {
           {status === 'loading' ? 'Loading…' : 'Load orders'}
         </button>
         {status === 'ready' && <span className="timezone-pill">{rows.length} orders</span>}
+        <label className="filter-button orders-upload-button">
+          Upload customer CSV
+          <input accept=".csv,text/csv" onChange={uploadCsv} type="file" />
+        </label>
+        {csvFileName && (
+          <span className="orders-upload-status" title={csvFileName}>
+            {csvFileName} · {enrichment.matchedCount}/{rows.length} matched
+          </span>
+        )}
       </form>
 
       {error && <div className="report-alert" role="alert">{error}</div>}
+      {csvError && <div className="report-alert" role="alert">{csvError}</div>}
 
       <div className="table-panel orders-panel">
         <div className="table-shell">
@@ -118,14 +172,14 @@ function Orders() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {displayedRows.map((row) => (
                 <tr key={row.id}>
                   {orderHeaders.map((header) => (
                     <td key={header.key}>{displayCell(row, header.key)}</td>
                   ))}
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {displayedRows.length === 0 && (
                 <tr>
                   <td colSpan={orderHeaders.length}>
                     {status === 'loading' ? 'Loading HubSpot orders…' : 'No paid orders found for this date'}

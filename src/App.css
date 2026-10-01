@@ -486,6 +486,30 @@
   text-align: center;
 }
 
+.orders-upload-button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.orders-upload-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.orders-upload-status {
+  max-width: 320px;
+  overflow: hidden;
+  color: var(--green);
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tracking-panel {
   width: 100%;
   max-width: none;
