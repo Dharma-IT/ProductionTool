@@ -2004,7 +2004,17 @@ async function loadAssociatedContactIdsByDealId(dealIds) {
 
 async function loadOrderContactsById(contactIds) {
   const contactsById = new Map()
-  const properties = ['firstname', 'lastname', 'address', 'street_address_2', 'city', 'state', 'zip']
+  const properties = [
+    'firstname',
+    'lastname',
+    'phone',
+    'mobilephone',
+    'address',
+    'street_address_2',
+    'city',
+    'state',
+    'zip',
+  ]
 
   for (const contactIdChunk of chunkArray([...new Set(contactIds)], 100)) {
     const payload = await hubspotFetch('/crm/v3/objects/contacts/batch/read', {
@@ -2071,7 +2081,7 @@ async function buildHubSpotOrdersReport(selectedDate) {
     [...contactIdsByDealId.values()].flat(),
   )
 
-  const rows = deals.map((deal, index) => {
+  const rows = deals.map((deal) => {
     const properties = deal.properties ?? {}
     const contactId = contactIdsByDealId.get(String(deal.id))?.[0]
     const contact = contactsById.get(contactId) ?? {}
@@ -2081,7 +2091,7 @@ async function buildHubSpotOrdersReport(selectedDate) {
 
     return {
       id: String(deal.id),
-      number: index + 1,
+      number: contact.phone || contact.mobilephone || '',
       clientName: `${clientName || 'Unknown client'}${itemCount > 1 ? ` (${itemCount})` : ''}`,
       treatment: description,
       purchaseDate: properties[paidDateProperty] ?? '',
