@@ -494,6 +494,14 @@
   overflow-wrap: normal;
 }
 
+.orders-table th:nth-child(2),
+.orders-table td:nth-child(2) {
+  width: 220px;
+  min-width: 220px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 .orders-treatment-pill {
   display: block;
   width: 100%;
@@ -544,10 +552,10 @@
   width: 100%;
   min-width: 90px;
   padding: 4px 6px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(0, 86, 63, 0.1);
   border-radius: 5px;
   color: inherit;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.58);
   font: inherit;
   font-weight: inherit;
   line-height: inherit;
@@ -562,8 +570,19 @@
   outline: none;
 }
 
+.orders-cell-input:focus,
+.orders-treatment-pill:focus,
+.orders-status-select:focus {
+  box-shadow: 0 0 0 2px rgba(0, 86, 63, 0.1);
+}
+
 .orders-table td:first-child .orders-cell-input {
   min-width: 145px;
+  white-space: nowrap;
+}
+
+.orders-table td:nth-child(2) .orders-cell-input {
+  min-width: 195px;
   white-space: nowrap;
 }
 
