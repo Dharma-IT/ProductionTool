@@ -98,6 +98,22 @@ test('treats matching Semaglutide as a medical product', () => {
   assert.equal(result.rows[0].doctorPrescribed, '')
 })
 
+test('marks GHK-Cu pending until it is verified by the uploaded CSV', () => {
+  const unmatchedLookup = buildOrderCsvLookup([csvRow({ purchase: 'Lipo-Mino' })])
+  const pendingResult = enrichHubSpotOrders([
+    order({ treatment: '1x GHK-Cu Troches - 3 Months' }),
+  ], unmatchedLookup)
+
+  assert.equal(pendingResult.rows[0].medicalForm, 'Pending')
+
+  const verifiedLookup = buildOrderCsvLookup([csvRow({ purchase: 'GHK-Cu Troches (One Time / 90-Day Supply)' })])
+  const verifiedResult = enrichHubSpotOrders([
+    order({ treatment: '1x GHK-Cu Troches - 3 Months' }),
+  ], verifiedLookup)
+
+  assert.equal(verifiedResult.rows[0].medicalForm, 'Yes')
+})
+
 test('leaves non-medical products blank and removes null-like address values', () => {
   const lookup = buildOrderCsvLookup([csvRow({
     formattedAddress: 'null', street: 'null', street2: 'undefined', city: 'null', state: 'null', zip: 'null',

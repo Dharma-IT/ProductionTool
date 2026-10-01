@@ -68,6 +68,7 @@ function medicalProducts(value) {
   if (normalized.includes('tirzepatide')) products.add('tirzepatide')
   if (normalized.includes('semaglutide')) products.add('semaglutide')
   if (normalized.includes('sermorelin') || normalized.includes('sermorlin')) products.add('sermorelin')
+  if (/ghk[\s-]*cu/.test(normalized)) products.add('ghk-cu')
   return products
 }
 
