@@ -502,6 +502,12 @@
   overflow-wrap: normal;
 }
 
+.orders-table th:nth-child(4),
+.orders-table td:nth-child(4) {
+  width: 380px;
+  min-width: 380px;
+}
+
 .orders-treatment-pill {
   display: block;
   width: 100%;
@@ -514,8 +520,12 @@
   font: inherit;
   font-weight: 800;
   text-align: center;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
+}
+
+.orders-table td:nth-child(4) .orders-treatment-pill {
+  min-width: 350px;
 }
 
 .orders-status-select.yes {
