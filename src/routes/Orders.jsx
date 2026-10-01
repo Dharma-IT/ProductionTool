@@ -67,7 +67,7 @@ function Orders() {
   const [csvLookup, setCsvLookup] = useState(null)
   const [csvFileName, setCsvFileName] = useState('')
   const [csvError, setCsvError] = useState('')
-  const [doctorStatuses, setDoctorStatuses] = useState({})
+  const [cellEdits, setCellEdits] = useState({})
 
   const enrichment = useMemo(
     () => csvLookup ? enrichHubSpotOrders(rows, csvLookup) : { rows, matchedCount: 0 },
@@ -77,13 +77,15 @@ function Orders() {
   const treatmentColorLookup = useMemo(() => {
     const lookup = new Map()
     displayedRows.forEach((row) => {
-      const treatment = String(row.treatment ?? '').replace(/^\d+x\s+/i, '').trim()
+      const treatment = String(cellEdits[row.id]?.treatment ?? row.treatment ?? '')
+        .replace(/^\d+x\s+/i, '')
+        .trim()
       if (treatment && !lookup.has(treatment)) {
         lookup.set(treatment, treatmentColors[lookup.size % treatmentColors.length])
       }
     })
     return lookup
-  }, [displayedRows])
+  }, [cellEdits, displayedRows])
 
   useEffect(() => {
     let active = true
@@ -142,39 +144,44 @@ function Orders() {
     }
   }
 
-  function updateDoctorStatus(rowId, value) {
-    setDoctorStatuses((current) => ({ ...current, [rowId]: value }))
+  function readEditableValue(row, key) {
+    return Object.hasOwn(cellEdits[row.id] ?? {}, key)
+      ? cellEdits[row.id][key]
+      : displayCell(row, key)
+  }
+
+  function updateCell(rowId, key, value) {
+    setCellEdits((current) => ({
+      ...current,
+      [rowId]: { ...current[rowId], [key]: value },
+    }))
   }
 
   function renderOrderCell(row, header) {
+    const editableValue = readEditableValue(row, header.key)
+
     if (header.key === 'treatment') {
-      const treatmentName = String(row.treatment ?? '').replace(/^\d+x\s+/i, '').trim()
+      const treatmentName = String(editableValue).replace(/^\d+x\s+/i, '').trim()
       return (
-        <span
+        <input
+          aria-label={`Treatment for ${row.clientName}`}
           className="orders-treatment-pill"
           style={{ '--treatment-color': treatmentColorLookup.get(treatmentName) }}
-          title={displayCell(row, header.key)}
-        >
-          {displayCell(row, header.key)}
-        </span>
+          title={editableValue}
+          type="text"
+          value={editableValue}
+          onChange={(event) => updateCell(row.id, header.key, event.target.value)}
+        />
       )
     }
 
-    if (header.key === 'medicalForm') {
-      const statusValue = displayCell(row, header.key)
-      return statusValue
-        ? <span className={`orders-status-pill ${statusValue.toLowerCase()}`}>{statusValue}</span>
-        : ''
-    }
-
-    if (header.key === 'doctorPrescribed') {
-      const selectedStatus = doctorStatuses[row.id] ?? ''
+    if (header.key === 'medicalForm' || header.key === 'doctorPrescribed') {
       return (
         <select
-          aria-label={`Doctor prescribed status for ${row.clientName}`}
-          className={`orders-status-select ${selectedStatus.toLowerCase()}`}
-          value={selectedStatus}
-          onChange={(event) => updateDoctorStatus(row.id, event.target.value)}
+          aria-label={`${header.label} for ${row.clientName}`}
+          className={`orders-status-select ${String(editableValue).toLowerCase()}`}
+          value={editableValue}
+          onChange={(event) => updateCell(row.id, header.key, event.target.value)}
         >
           <option value="">Select</option>
           <option value="Yes">Yes</option>
@@ -184,7 +191,15 @@ function Orders() {
       )
     }
 
-    return displayCell(row, header.key)
+    return (
+      <input
+        aria-label={`${header.label} for ${row.clientName}`}
+        className="orders-cell-input"
+        type="text"
+        value={editableValue}
+        onChange={(event) => updateCell(row.id, header.key, event.target.value)}
+      />
+    )
   }
 
   return (

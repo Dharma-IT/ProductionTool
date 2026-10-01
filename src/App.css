@@ -494,36 +494,27 @@
   overflow-wrap: normal;
 }
 
-.orders-treatment-pill,
-.orders-status-pill {
+.orders-treatment-pill {
   display: block;
   width: 100%;
-  border-radius: 999px;
-  text-align: center;
-}
-
-.orders-treatment-pill {
   padding: 3px 10px;
   overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink);
   background: var(--treatment-color, #e3e5e8);
+  font: inherit;
   font-weight: 800;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.orders-status-pill {
-  padding: 3px 8px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.orders-status-pill.yes,
 .orders-status-select.yes {
   color: #176b36;
   background: #d8efc5;
 }
 
-.orders-status-pill.pending,
 .orders-status-select.pending {
   color: #8a5b00;
   background: #ffedb8;
@@ -547,6 +538,33 @@
   text-align: center;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+.orders-cell-input {
+  width: 100%;
+  min-width: 90px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: inherit;
+}
+
+.orders-cell-input:hover,
+.orders-cell-input:focus,
+.orders-treatment-pill:hover,
+.orders-treatment-pill:focus {
+  border-color: rgba(0, 86, 63, 0.28);
+  outline: none;
+}
+
+.orders-table td:first-child .orders-cell-input {
+  min-width: 145px;
+  white-space: nowrap;
 }
 
 .orders-upload-button {

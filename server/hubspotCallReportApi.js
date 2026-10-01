@@ -2009,6 +2009,11 @@ async function loadOrderContactsById(contactIds) {
     'lastname',
     'phone',
     'mobilephone',
+    'hs_language',
+    'preffered_language',
+    'idioma_hablado',
+    'idioma_en_es',
+    'hs_inferred_language_codes',
     'address',
     'street_address_2',
     'city',
@@ -2096,6 +2101,12 @@ async function buildHubSpotOrdersReport(selectedDate) {
       treatment: description,
       purchaseDate: properties[paidDateProperty] ?? '',
       seller: readFirstOwnerName(owners, properties.hubspot_owner_id),
+      language: contact.hs_language
+        || contact.preffered_language
+        || contact.idioma_hablado
+        || contact.idioma_en_es
+        || contact.hs_inferred_language_codes
+        || '',
       address: [contact.address, contact.street_address_2].filter(Boolean).join(', '),
       city: contact.city ?? '',
       state: contact.state ?? '',

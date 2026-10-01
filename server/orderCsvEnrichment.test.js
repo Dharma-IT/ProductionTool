@@ -19,6 +19,7 @@ function csvRow(overrides = {}) {
     state: 'NJ',
     zip: '07105',
     purchase: 'Personalized Tirzepatide+ 52mg',
+    preferredLanguages: 'Spanish',
     purchaseSurveyCompletionDate: '2026-09-30T12:00:00Z',
     ...overrides,
   }
@@ -39,10 +40,11 @@ test('matches country-code phone numbers and separates address fields', () => {
 
   assert.equal(result.matchedCount, 1)
   assert.deepEqual(
-    (({ address, city, state, zipCode, medicalForm, doctorPrescribed }) => (
-      { address, city, state, zipCode, medicalForm, doctorPrescribed }
+    (({ language, address, city, state, zipCode, medicalForm, doctorPrescribed }) => (
+      { language, address, city, state, zipCode, medicalForm, doctorPrescribed }
     ))(result.rows[0]),
     {
+      language: 'Spanish',
       address: '10 Main Street, Apt 2',
       city: 'Newark',
       state: 'NJ',
@@ -51,6 +53,13 @@ test('matches country-code phone numbers and separates address fields', () => {
       doctorPrescribed: '',
     },
   )
+})
+
+test('keeps the HubSpot language when the uploaded CSV has none', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ preferredLanguages: '' })])
+  const result = enrichHubSpotOrders([order({ language: 'English' })], lookup)
+
+  assert.equal(result.rows[0].language, 'English')
 })
 
 test('falls back to normalized names and formatted addresses', () => {
