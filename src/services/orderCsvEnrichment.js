@@ -66,6 +66,7 @@ function medicalProducts(value) {
   const normalized = cleanCsvValue(value).toLowerCase()
   const products = new Set()
   if (normalized.includes('tirzepatide')) products.add('tirzepatide')
+  if (normalized.includes('semaglutide')) products.add('semaglutide')
   if (normalized.includes('sermorelin') || normalized.includes('sermorlin')) products.add('sermorelin')
   return products
 }

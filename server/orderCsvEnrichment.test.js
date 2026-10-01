@@ -88,6 +88,16 @@ test('requires the same medical product in HubSpot and the CSV', () => {
   assert.equal(result.rows[0].doctorPrescribed, '')
 })
 
+test('treats matching Semaglutide as a medical product', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ purchase: 'Personalized Semaglutide+ 1mg' })])
+  const result = enrichHubSpotOrders([
+    order({ treatment: '1x Compounded Semaglutide 1mg' }),
+  ], lookup)
+
+  assert.equal(result.rows[0].medicalForm, 'Yes')
+  assert.equal(result.rows[0].doctorPrescribed, '')
+})
+
 test('leaves non-medical products blank and removes null-like address values', () => {
   const lookup = buildOrderCsvLookup([csvRow({
     formattedAddress: 'null', street: 'null', street2: 'undefined', city: 'null', state: 'null', zip: 'null',

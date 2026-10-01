@@ -184,7 +184,7 @@ function Orders() {
           value={editableValue}
           onChange={(event) => updateCell(row.id, header.key, event.target.value)}
         >
-          <option value="">Select</option>
+          <option value="">{header.key === 'medicalForm' ? '' : 'Select'}</option>
           <option value="Yes">Yes</option>
           <option value="Pending">Pending</option>
           <option value="No">No</option>
