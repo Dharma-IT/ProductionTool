@@ -70,6 +70,11 @@ function medicalProducts(value) {
   return products
 }
 
+function displayLanguage(value) {
+  const language = cleanCsvValue(value)
+  return /^es(?:[-_]|$)/i.test(language) ? 'Spanish' : language
+}
+
 function completionTime(row) {
   const timestamp = Date.parse(cleanCsvValue(row.purchaseSurveyCompletionDate))
   return Number.isNaN(timestamp) ? 0 : timestamp
@@ -160,7 +165,7 @@ export function enrichHubSpotOrders(orders, lookup) {
 
     return {
       ...order,
-      language: cleanCsvValue(languageMatch?.preferredLanguages) || cleanCsvValue(order.language),
+      language: displayLanguage(languageMatch?.preferredLanguages || order.language),
       address: address.address,
       city: address.city,
       state: address.state,

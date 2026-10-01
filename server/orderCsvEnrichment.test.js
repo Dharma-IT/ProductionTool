@@ -62,6 +62,13 @@ test('keeps the HubSpot language when the uploaded CSV has none', () => {
   assert.equal(result.rows[0].language, 'English')
 })
 
+test('maps an uploaded es language code to Spanish', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ preferredLanguages: 'es' })])
+  const result = enrichHubSpotOrders([order({ language: 'English' })], lookup)
+
+  assert.equal(result.rows[0].language, 'Spanish')
+})
+
 test('falls back to normalized names and formatted addresses', () => {
   const input = csvRow({
     phone: '0000000000', street: '', street2: '', city: '', state: '', zip: '',

@@ -589,6 +589,15 @@
 .orders-upload-button {
   display: inline-flex;
   align-items: center;
+  border-color: var(--green);
+  color: #fff;
+  background: var(--green);
+}
+
+.orders-upload-button:hover {
+  border-color: var(--green-deep);
+  color: #fff;
+  background: var(--green-deep);
 }
 
 .orders-upload-button input {

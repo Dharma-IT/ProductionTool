@@ -50,6 +50,7 @@ function todayIsoDate() {
 function displayCell(row, key) {
   const value = row[key]
   if (!value) return ''
+  if (key === 'language' && /^es(?:[-_]|$)/i.test(String(value).trim())) return 'Spanish'
   if (key !== 'purchaseDate') return value
 
   const date = new Date(value)
