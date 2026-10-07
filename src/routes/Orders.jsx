@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
 import { loadOrdersHistory, saveOrdersHistory } from '../services/ordersHistory'
@@ -43,8 +43,6 @@ const treatmentColors = [
   '#e3e5e8', '#d9ecff', '#f8dbec', '#e5e0ff', '#dff0c9',
 ]
 
-const ordersAccessPin = '1111'
-
 function todayIsoDate() {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -63,10 +61,6 @@ function displayCell(row, key) {
 }
 
 function Orders() {
-  const [isUnlocked, setIsUnlocked] = useState(false)
-  const [pinDigits, setPinDigits] = useState(['', '', '', ''])
-  const [pinError, setPinError] = useState('')
-  const pinInputRefs = useRef([])
   const [selectedDate, setSelectedDate] = useState(todayIsoDate)
   const [request, setRequest] = useState({ date: todayIsoDate(), sequence: 0 })
   const [rows, setRows] = useState([])
@@ -102,17 +96,15 @@ function Orders() {
   }, [cellEdits, visibleRows])
 
   useEffect(() => {
-    if (!isUnlocked || activeView !== 'history') return undefined
+    if (activeView !== 'history') return undefined
     let active = true
     loadOrdersHistory(historyDate)
       .then((loadedRows) => { if (active) setHistoryRows(loadedRows) })
       .catch((loadError) => { if (active) setSaveMessage(loadError.message) })
     return () => { active = false }
-  }, [activeView, historyDate, isUnlocked])
+  }, [activeView, historyDate])
 
   useEffect(() => {
-    if (!isUnlocked) return undefined
-
     let active = true
 
     loadHubSpotOrders(request.date)
@@ -131,48 +123,7 @@ function Orders() {
     return () => {
       active = false
     }
-  }, [isUnlocked, request])
-
-  function checkPin(nextDigits) {
-    if (nextDigits.some((digit) => !digit)) return
-
-    if (nextDigits.join('') === ordersAccessPin) {
-      setPinError('')
-      setStatus('loading')
-      setIsUnlocked(true)
-      return
-    }
-
-    setPinError('Incorrect access code')
-    setPinDigits(['', '', '', ''])
-    window.setTimeout(() => pinInputRefs.current[0]?.focus(), 0)
-  }
-
-  function updatePinDigit(index, value) {
-    const digits = value.replace(/\D/g, '')
-    const nextDigits = [...pinDigits]
-
-    if (digits.length > 1) {
-      digits.slice(0, 4).split('').forEach((digit, digitIndex) => {
-        nextDigits[digitIndex] = digit
-      })
-      setPinDigits(nextDigits)
-      checkPin(nextDigits)
-      return
-    }
-
-    nextDigits[index] = digits.slice(-1)
-    setPinDigits(nextDigits)
-    setPinError('')
-    if (digits && index < 3) pinInputRefs.current[index + 1]?.focus()
-    checkPin(nextDigits)
-  }
-
-  function handlePinKeyDown(index, event) {
-    if (event.key === 'Backspace' && !pinDigits[index] && index > 0) {
-      pinInputRefs.current[index - 1]?.focus()
-    }
-  }
+  }, [request])
 
   function submitDate(event) {
     event.preventDefault()
@@ -320,8 +271,8 @@ function Orders() {
   }
 
   return (
-    <section className={`route-view orders-route${isUnlocked ? '' : ' locked'}`} aria-label="Orders dashboard">
-      <div className="orders-dashboard-content" aria-hidden={!isUnlocked} inert={!isUnlocked}>
+    <section className="route-view orders-route" aria-label="Orders dashboard">
+      <div className="orders-dashboard-content">
         <div className="report-toolbar">
         <div>
           <h1 id="orders-title">Orders</h1>
@@ -405,38 +356,6 @@ function Orders() {
         </div>
       </div>
 
-      {!isUnlocked && (
-        <div className="orders-lock-screen" role="dialog" aria-modal="true" aria-labelledby="orders-lock-title">
-          <div className="orders-lock-card">
-            <span className="orders-warning-orbit orbit-one" aria-hidden="true" />
-            <span className="orders-warning-orbit orbit-two" aria-hidden="true" />
-            <div className="orders-warning-icon" aria-hidden="true">!</div>
-            <span className="orders-lock-kicker">Restricted preview</span>
-            <h2 id="orders-lock-title">Under Construction</h2>
-            <div className="orders-pin-inputs" aria-label="Four digit access code">
-              {pinDigits.map((digit, index) => (
-                <input
-                  aria-label={`Access code digit ${index + 1}`}
-                  autoComplete="off"
-                  autoFocus={index === 0}
-                  inputMode="numeric"
-                  key={index}
-                  maxLength="4"
-                  ref={(element) => { pinInputRefs.current[index] = element }}
-                  type="password"
-                  value={digit}
-                  onChange={(event) => updatePinDigit(index, event.target.value)}
-                  onKeyDown={(event) => handlePinKeyDown(index, event)}
-                />
-              ))}
-            </div>
-            <div className={`orders-pin-feedback${pinError ? ' error' : ''}`} aria-live="polite">
-              {pinError || 'Four-digit team access code required'}
-            </div>
-            <a className="orders-lock-back" href="/home">← Back to dashboard</a>
-          </div>
-        </div>
-      )}
     </section>
   )
 }
