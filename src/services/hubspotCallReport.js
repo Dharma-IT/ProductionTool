@@ -205,6 +205,23 @@ export function getReportSlots(date) {
   return reportTimes.map((time) => ({ date: reportDate, time }))
 }
 
+export async function loadActiveHubSpotOwners() {
+  const configuredEndpoint = import.meta.env.VITE_HUBSPOT_CALL_REPORT_URL
+  const requestUrl = new URL(configuredEndpoint || '/api/hubspot/call-report', window.location.origin)
+
+  requestUrl.pathname = '/api/hubspot/owners'
+  requestUrl.search = ''
+
+  const response = await fetch(requestUrl, { cache: 'no-store' })
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(payload.message || `Unable to load active HubSpot users (${response.status}).`)
+  }
+
+  return Array.isArray(payload.owners) ? payload.owners : []
+}
+
 export async function loadHubSpotCallReport(date, options = {}) {
   const endpoint = import.meta.env.VITE_HUBSPOT_CALL_REPORT_URL
 

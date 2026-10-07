@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadHubSpotCallReport } from '../services/hubspotCallReport'
+import { loadActiveHubSpotOwners, loadHubSpotCallReport } from '../services/hubspotCallReport'
 
 const reportTimeZone = 'America/New_York'
 const defaultAverageRuntimeMs = 45000
 const averageRuntimeCacheKey = 'hubspot-call-report-average-runtime-ms'
 const outboundAssignmentStorageKey = 'hubspot-call-report-outbound-assignments'
+const teamMembershipStorageKey = 'hubspot-call-report-team-members-v1'
 const missingCallerName = 'No caller found'
 const additionalOutboundCallerNames = ['Zara Meza']
-const outboundCallerAssignments = [
+const defaultOutboundCallerAssignments = [
   {
     id: 'laura-main',
     ownerName: 'Laura Sanchez',
@@ -47,6 +48,46 @@ const outboundCallerAssignments = [
     ],
   },
 ]
+
+function cloneDefaultTeamAssignments() {
+  return defaultOutboundCallerAssignments.map((assignment) => ({
+    ...assignment,
+    agentNames: [...assignment.agentNames],
+  }))
+}
+
+function normalizeTeamAssignments(value) {
+  return defaultOutboundCallerAssignments.map((assignment) => {
+    const savedAgentNames = value?.[assignment.id]
+
+    return {
+      ...assignment,
+      agentNames: Array.isArray(savedAgentNames)
+        ? [...new Set(savedAgentNames.map((name) => String(name ?? '').trim()).filter(Boolean))]
+        : [...assignment.agentNames],
+    }
+  })
+}
+
+function readTeamAssignments() {
+  try {
+    return normalizeTeamAssignments(JSON.parse(window.localStorage.getItem(teamMembershipStorageKey)))
+  } catch {
+    return cloneDefaultTeamAssignments()
+  }
+}
+
+function writeTeamAssignments(assignments) {
+  try {
+    const storedAssignments = Object.fromEntries(
+      assignments.map((assignment) => [assignment.id, assignment.agentNames]),
+    )
+
+    window.localStorage.setItem(teamMembershipStorageKey, JSON.stringify(storedAssignments))
+  } catch {
+    // Team management still works for this session when local storage is unavailable.
+  }
+}
 
 function normalizePersonName(value) {
   const normalizedName = String(value ?? '')
@@ -289,6 +330,14 @@ function HubSpotCallReport() {
   const [loadingElapsedMs, setLoadingElapsedMs] = useState(0)
   const [averageRuntimeMs, setAverageRuntimeMs] = useState(() => readAverageRuntimeMs())
   const [notCalledDialog, setNotCalledDialog] = useState(null)
+  const [teamAssignments, setTeamAssignments] = useState(() => readTeamAssignments())
+  const [teamManagerOpen, setTeamManagerOpen] = useState(false)
+  const [draftTeamAssignments, setDraftTeamAssignments] = useState(() => readTeamAssignments())
+  const [activeHubSpotOwners, setActiveHubSpotOwners] = useState([])
+  const [teamManagerStatus, setTeamManagerStatus] = useState('idle')
+  const [teamManagerError, setTeamManagerError] = useState('')
+  const [selectedTeamId, setSelectedTeamId] = useState(defaultOutboundCallerAssignments[0].id)
+  const [selectedMemberId, setSelectedMemberId] = useState('')
   const [outboundAssignmentOverrides, setOutboundAssignmentOverrides] = useState(() => readOutboundAssignmentOverrides())
   const [draftOutboundAssignmentOverrides, setDraftOutboundAssignmentOverrides] = useState(() => readOutboundAssignmentOverrides())
   const averageRuntimeRef = useRef(averageRuntimeMs)
@@ -364,6 +413,61 @@ function HubSpotCallReport() {
     })
   }
 
+  function openTeamManager() {
+    setDraftTeamAssignments(teamAssignments.map((assignment) => ({
+      ...assignment,
+      agentNames: [...assignment.agentNames],
+    })))
+    setSelectedMemberId('')
+    setTeamManagerError('')
+    setTeamManagerOpen(true)
+    setTeamManagerStatus('loading')
+
+    loadActiveHubSpotOwners()
+      .then((owners) => {
+        setActiveHubSpotOwners(owners)
+        setTeamManagerStatus('ready')
+      })
+      .catch((loadError) => {
+        setTeamManagerError(loadError.message)
+        setTeamManagerStatus('error')
+      })
+  }
+
+  function closeTeamManager() {
+    setTeamManagerOpen(false)
+    setSelectedMemberId('')
+  }
+
+  function addSelectedTeamMember() {
+    const selectedOwner = activeHubSpotOwners.find((owner) => owner.id === selectedMemberId)
+    if (!selectedOwner) return
+
+    setDraftTeamAssignments((assignments) => assignments.map((assignment) => (
+      assignment.id === selectedTeamId
+        ? { ...assignment, agentNames: [...assignment.agentNames, selectedOwner.name] }
+        : assignment
+    )))
+    setSelectedMemberId('')
+  }
+
+  function removeTeamMember(teamId, memberName) {
+    setDraftTeamAssignments((assignments) => assignments.map((assignment) => (
+      assignment.id === teamId
+        ? {
+            ...assignment,
+            agentNames: assignment.agentNames.filter((name) => name !== memberName),
+          }
+        : assignment
+    )))
+  }
+
+  function saveTeamAssignments() {
+    writeTeamAssignments(draftTeamAssignments)
+    setTeamAssignments(draftTeamAssignments)
+    closeTeamManager()
+  }
+
   const scheduleRows = useMemo(() => {
     return report.rows.map((row) => {
       const meetingName = row.meetingName
@@ -421,19 +525,19 @@ function HubSpotCallReport() {
   }, [scheduleRows])
   const outboundCallerOptions = useMemo(() => {
     return [...new Set([
-      ...outboundCallerAssignments.map((assignment) => assignment.ownerName),
-      ...outboundCallerAssignments.flatMap((assignment) => assignment.agentNames),
+      ...teamAssignments.map((assignment) => assignment.ownerName),
+      ...teamAssignments.flatMap((assignment) => assignment.agentNames),
       ...additionalOutboundCallerNames,
       ...scheduleRows.map((row) => row.callerName),
       ...scheduleRows.map((row) => row.meetingHost),
     ].filter(Boolean).map(getDisplayPersonName))]
       .sort((left, right) => left.localeCompare(right))
-  }, [scheduleRows])
+  }, [scheduleRows, teamAssignments])
   const outboundAssignmentOwners = useMemo(() => {
-    return [...new Set(outboundCallerAssignments.map((assignment) => assignment.ownerName))]
-  }, [])
+    return [...new Set(teamAssignments.map((assignment) => assignment.ownerName))]
+  }, [teamAssignments])
   const confirmedCallsByAgent = useMemo(() => {
-    const assignmentRows = outboundCallerAssignments.map((assignment) => {
+    const assignmentRows = teamAssignments.map((assignment) => {
       const assignedCallerName = outboundAssignmentOverrides[assignment.ownerName] || assignment.ownerName
 
       return createEmptyAssignmentStats(assignment, assignedCallerName)
@@ -506,9 +610,9 @@ function HubSpotCallReport() {
         || right.confirmedCalled - left.confirmedCalled
         || left.callerName.localeCompare(right.callerName),
       )
-  }, [outboundAssignmentOverrides, scheduleRows])
+  }, [outboundAssignmentOverrides, scheduleRows, teamAssignments])
   const zaraPreviousDayCalling = useMemo(() => {
-    const assignment = outboundCallerAssignments.find((entry) => entry.id === 'zara-secondary')
+    const assignment = teamAssignments.find((entry) => entry.id === 'zara-secondary')
     if (!assignment) return null
 
     const shouldUseCurrentDayCalling = reportWeekday === 'Monday'
@@ -559,7 +663,7 @@ function HubSpotCallReport() {
         ? Math.round((agentRows.totalAppointments / scheduleRows.length) * 100)
         : 0,
     }
-  }, [outboundAssignmentOverrides, reportWeekday, scheduleRows])
+  }, [outboundAssignmentOverrides, reportWeekday, scheduleRows, teamAssignments])
   const confirmedRate = scheduleRows.length > 0
     ? Math.round((totalConfirmedAppointments / scheduleRows.length) * 100)
     : 0
@@ -570,6 +674,15 @@ function HubSpotCallReport() {
     ? Math.min(96, Math.max(5, Math.round((loadingElapsedMs / averageRuntimeMs) * 100)))
     : 100
   const remainingRuntimeMs = Math.max(0, averageRuntimeMs - loadingElapsedMs)
+  const managedMemberNames = new Set(
+    draftTeamAssignments.flatMap((assignment) => assignment.agentNames.map(normalizePersonName)),
+  )
+  const availableHubSpotOwners = activeHubSpotOwners.filter((owner) => (
+    !managedMemberNames.has(normalizePersonName(owner.name))
+    && !draftTeamAssignments.some((assignment) => (
+      normalizePersonName(assignment.ownerName) === normalizePersonName(owner.name)
+    ))
+  ))
 
   useEffect(() => {
     const tableScroller = tableScrollRef.current
@@ -611,6 +724,20 @@ function HubSpotCallReport() {
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [notCalledDialog])
+
+  useEffect(() => {
+    if (!teamManagerOpen) return undefined
+
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setTeamManagerOpen(false)
+        setSelectedMemberId('')
+      }
+    }
+
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [teamManagerOpen])
 
   function scrollTable(direction) {
     const tableScroller = tableScrollRef.current
@@ -761,6 +888,13 @@ function HubSpotCallReport() {
               onClick={() => fetchSelectedReport({ forceRefresh: true })}
             >
               Refresh Live
+            </button>
+            <button
+              className="filter-button manage-team-button"
+              type="button"
+              onClick={openTeamManager}
+            >
+              Manage Team
             </button>
           </div>
           <div className="analytics-summary-grid">
@@ -1061,6 +1195,113 @@ function HubSpotCallReport() {
           </table>
         </div>
       </div>
+
+      {teamManagerOpen && (
+        <div
+          aria-labelledby="team-manager-title"
+          aria-modal="true"
+          className="report-modal-backdrop"
+          role="dialog"
+          onClick={closeTeamManager}
+        >
+          <div className="report-modal team-manager-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="report-modal-header">
+              <div>
+                <h2 id="team-manager-title">Manage Call Report Teams</h2>
+                <p>Add members from the active HubSpot user list or remove existing members.</p>
+              </div>
+              <button
+                aria-label="Close team manager"
+                className="report-modal-close"
+                type="button"
+                onClick={closeTeamManager}
+              >
+                x
+              </button>
+            </div>
+            <div className="team-manager-content">
+              <div className="team-manager-add-row">
+                <label>
+                  Team
+                  <select value={selectedTeamId} onChange={(event) => setSelectedTeamId(event.target.value)}>
+                    {draftTeamAssignments.map((assignment) => (
+                      <option key={assignment.id} value={assignment.id}>{assignment.ownerName}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Active HubSpot user
+                  <select
+                    disabled={teamManagerStatus !== 'ready' || availableHubSpotOwners.length === 0}
+                    value={selectedMemberId}
+                    onChange={(event) => setSelectedMemberId(event.target.value)}
+                  >
+                    <option value="">
+                      {teamManagerStatus === 'loading'
+                        ? 'Loading active users...'
+                        : availableHubSpotOwners.length === 0
+                          ? 'No unassigned active users'
+                          : 'Select a user'}
+                    </option>
+                    {availableHubSpotOwners.map((owner) => (
+                      <option key={owner.id} value={owner.id}>{owner.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="outbound-assignment-fetch"
+                  disabled={!selectedMemberId}
+                  type="button"
+                  onClick={addSelectedTeamMember}
+                >
+                  Add Member
+                </button>
+              </div>
+              {teamManagerError && <div className="report-alert">{teamManagerError}</div>}
+              <div className="team-manager-teams">
+                {draftTeamAssignments.map((assignment) => (
+                  <section className="team-manager-team" key={assignment.id}>
+                    <div className="team-manager-team-heading">
+                      <h3>{assignment.ownerName}</h3>
+                      <span>{assignment.agentNames.length} members</span>
+                    </div>
+                    <div className="team-manager-members">
+                      {assignment.agentNames.length === 0 && (
+                        <p>No members assigned to this team.</p>
+                      )}
+                      {assignment.agentNames.map((memberName) => (
+                        <div className="team-manager-member" key={memberName}>
+                          <span>{memberName}</span>
+                          <button
+                            aria-label={`Remove ${memberName} from ${assignment.ownerName}`}
+                            type="button"
+                            onClick={() => removeTeamMember(assignment.id, memberName)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+              <div className="team-manager-footer">
+                <span>
+                  {teamManagerStatus === 'ready'
+                    ? `${activeHubSpotOwners.length} active HubSpot users available`
+                    : 'HubSpot connection required to add members'}
+                </span>
+                <div>
+                  <button className="filter-button" type="button" onClick={closeTeamManager}>Cancel</button>
+                  <button className="outbound-assignment-fetch" type="button" onClick={saveTeamAssignments}>
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {notCalledDialog && (
         <div

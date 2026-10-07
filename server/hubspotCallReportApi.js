@@ -1802,10 +1802,30 @@ async function hubspotSearch(objectType, body) {
   return rows
 }
 
-async function loadOwners() {
-  const payload = await hubspotFetch('/crm/v3/owners?limit=100&archived=false')
+async function loadOwnerRecords() {
+  const owners = []
+  let after
 
-  return (payload.results ?? []).reduce((lookup, owner) => {
+  do {
+    const searchParams = new URLSearchParams({
+      limit: '100',
+      archived: 'false',
+    })
+
+    if (after) searchParams.set('after', after)
+
+    const payload = await hubspotFetch(`/crm/v3/owners?${searchParams}`)
+    owners.push(...(payload.results ?? []))
+    after = payload.paging?.next?.after
+  } while (after)
+
+  return owners
+}
+
+async function loadOwners() {
+  const ownerRecords = await loadOwnerRecords()
+
+  return ownerRecords.reduce((lookup, owner) => {
     lookup.set(String(owner.id), owner)
     if (owner.email) {
       lookup.set(String(owner.email).toLowerCase(), owner)
@@ -1816,6 +1836,19 @@ async function loadOwners() {
 
     return lookup
   }, new Map())
+}
+
+async function loadActiveOwnerOptions() {
+  const ownerRecords = await loadOwnerRecords()
+
+  return ownerRecords
+    .filter((owner) => !owner.archived && owner.userId)
+    .map((owner) => ({
+      id: String(owner.id),
+      name: ownerDisplayName(owner),
+    }))
+    .filter((owner) => owner.name)
+    .sort((left, right) => left.name.localeCompare(right.name))
 }
 
 function readFirstOwnerName(owners, value) {
@@ -3688,6 +3721,27 @@ const server = createServer(async (request, response) => {
         updatedAt: new Date().toISOString(),
       }, {
         'Cache-Control': 'no-store',
+      })
+    } catch (error) {
+      sendJson(request, response, 500, {
+        message: error.message,
+      }, {
+        'Cache-Control': 'no-store',
+      })
+    }
+    return
+  }
+
+  if (requestUrl.pathname === '/api/hubspot/owners' && request.method === 'GET') {
+    try {
+      const owners = await loadActiveOwnerOptions()
+
+      sendJson(request, response, 200, {
+        source: 'hubspot',
+        owners,
+        updatedAt: new Date().toISOString(),
+      }, {
+        'Cache-Control': 'private, max-age=300',
       })
     } catch (error) {
       sendJson(request, response, 500, {
