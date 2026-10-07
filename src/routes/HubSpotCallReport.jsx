@@ -10,7 +10,6 @@ const reportTimeZone = 'America/New_York'
 const defaultAverageRuntimeMs = 45000
 const averageRuntimeCacheKey = 'hubspot-call-report-average-runtime-ms'
 const outboundAssignmentStorageKey = 'hubspot-call-report-outbound-assignments'
-const teamMembershipStorageKey = 'hubspot-call-report-team-members-v1'
 const missingCallerName = 'No caller found'
 const additionalOutboundCallerNames = ['Zara Meza']
 const defaultOutboundCallerAssignments = [
@@ -72,24 +71,6 @@ function normalizeTeamAssignments(value) {
         : [...assignment.agentNames],
     }
   })
-}
-
-function readTeamAssignments() {
-  try {
-    return normalizeTeamAssignments(JSON.parse(window.localStorage.getItem(teamMembershipStorageKey)))
-  } catch {
-    return cloneDefaultTeamAssignments()
-  }
-}
-
-function writeTeamAssignments(assignments) {
-  try {
-    window.localStorage.setItem(teamMembershipStorageKey, JSON.stringify(serializeTeamAssignments(assignments)))
-    return true
-  } catch {
-    // Keep the editor open so the user can see that persistence was unavailable.
-    return false
-  }
 }
 
 function serializeTeamAssignments(assignments) {
@@ -339,9 +320,9 @@ function HubSpotCallReport() {
   const [loadingElapsedMs, setLoadingElapsedMs] = useState(0)
   const [averageRuntimeMs, setAverageRuntimeMs] = useState(() => readAverageRuntimeMs())
   const [notCalledDialog, setNotCalledDialog] = useState(null)
-  const [teamAssignments, setTeamAssignments] = useState(() => readTeamAssignments())
+  const [teamAssignments, setTeamAssignments] = useState(() => cloneDefaultTeamAssignments())
   const [teamManagerOpen, setTeamManagerOpen] = useState(false)
-  const [draftTeamAssignments, setDraftTeamAssignments] = useState(() => readTeamAssignments())
+  const [draftTeamAssignments, setDraftTeamAssignments] = useState(() => cloneDefaultTeamAssignments())
   const [activeHubSpotOwners, setActiveHubSpotOwners] = useState([])
   const [teamManagerStatus, setTeamManagerStatus] = useState('idle')
   const [teamManagerError, setTeamManagerError] = useState('')
@@ -359,7 +340,6 @@ function HubSpotCallReport() {
           const normalizedAssignments = normalizeTeamAssignments(assignments)
           setTeamAssignments(normalizedAssignments)
           setDraftTeamAssignments(normalizedAssignments)
-          writeTeamAssignments(normalizedAssignments)
         }
         setSharedTeamStatus('ready')
       })
@@ -511,7 +491,6 @@ function HubSpotCallReport() {
       const savedAssignments = await saveSharedCallReportTeams(serializeTeamAssignments(assignmentsToSave))
       const normalizedAssignments = normalizeTeamAssignments(savedAssignments)
 
-      writeTeamAssignments(normalizedAssignments)
       setDraftTeamAssignments(normalizedAssignments)
       setTeamAssignments(normalizedAssignments)
       setSharedTeamStatus('ready')
