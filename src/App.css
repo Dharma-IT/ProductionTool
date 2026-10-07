@@ -451,6 +451,15 @@
   max-width: none;
 }
 
+.orders-view-tabs { display: flex; gap: 8px; margin: 18px 0 10px; }
+.orders-view-tabs button {
+  padding: 9px 16px; border: 1px solid rgba(0, 86, 63, 0.22); border-radius: 999px;
+  color: var(--green); background: #fff; font: inherit; font-size: 0.82rem; font-weight: 900; cursor: pointer;
+}
+.orders-view-tabs button.active { color: #fff; background: var(--green); }
+.orders-save-button { border-color: #9b6a00; color: #fff; background: #9b6a00; }
+.orders-save-message { margin: 10px 0; color: var(--green); font-size: 0.82rem; font-weight: 850; }
+
 .orders-route {
   position: relative;
 }

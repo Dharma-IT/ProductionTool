@@ -14,6 +14,7 @@ const shopifyApiVersion = process.env.SHOPIFY_API_VERSION ?? '2026-01'
 const defaultShopifyStatusSheetCsvUrl = 'https://docs.google.com/spreadsheets/d/1uBJLgzyYtBnPxR9x-DuHRcJz1DTJm3YSK7halebtWLg/gviz/tq?tqx=out:csv&gid=608356906'
 const supabaseTrackingTable = process.env.SUPABASE_TRACKING_TABLE ?? 'tracking_dashboard'
 const supabasePaymentHistoryTable = process.env.SUPABASE_PAYMENT_HISTORY_TABLE ?? 'payment_history'
+const supabaseOrdersHistoryTable = process.env.SUPABASE_ORDERS_HISTORY_TABLE ?? 'orders_history'
 const supabaseCallReportTeamsTable = process.env.SUPABASE_CALL_REPORT_TEAMS_TABLE ?? 'call_report_teams'
 const excludedTrackingOrderNumbers = readExcludedTrackingOrderNumbers()
 const overdueDaysThreshold = 5
@@ -1271,6 +1272,65 @@ async function getUspsAccessToken() {
   })
 
   return uspsAccessTokenRequest
+}
+
+function buildOrdersHistoryDatabaseRow(row, reportDate, sourceFileName) {
+  const existingRowId = String(row.rowId ?? '').trim()
+  const sourceId = String(row.id ?? '').trim()
+  const rowId = existingRowId || (sourceId ? `${reportDate}:${sourceId}` : createHash('sha256')
+    .update(`${reportDate}|${row.number ?? ''}|${row.clientName ?? ''}|${row.treatment ?? ''}`)
+    .digest('hex'))
+
+  return {
+    row_id: rowId,
+    report_date: reportDate,
+    client_name: row.clientName || null,
+    treatment: row.treatment || null,
+    medical_form: row.medicalForm || null,
+    source_file_name: sourceFileName || row.sourceFileName || null,
+    raw_data: { ...row, id: rowId, reportDate },
+    imported_at: row.importedAt || new Date().toISOString(),
+  }
+}
+
+function normalizeOrdersHistoryDatabaseRow(row) {
+  return {
+    ...(row.raw_data ?? {}),
+    id: row.row_id,
+    rowId: row.row_id,
+    reportDate: row.report_date,
+    clientName: row.client_name ?? row.raw_data?.clientName ?? '',
+    treatment: row.treatment ?? row.raw_data?.treatment ?? '',
+    medicalForm: row.medical_form ?? row.raw_data?.medicalForm ?? '',
+    sourceFileName: row.source_file_name ?? '',
+    importedAt: row.imported_at ?? null,
+  }
+}
+
+async function upsertOrdersHistoryRowsToSupabase(rows, reportDate, sourceFileName) {
+  if (!hasSupabaseConfig() || rows.length === 0) return []
+  const databaseRows = rows.map((row) => buildOrdersHistoryDatabaseRow(row, reportDate, sourceFileName))
+
+  for (let index = 0; index < databaseRows.length; index += 500) {
+    await supabaseRequest(`/${supabaseOrdersHistoryTable}?on_conflict=row_id`, {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: databaseRows.slice(index, index + 500),
+    })
+  }
+
+  return databaseRows
+}
+
+async function loadOrdersHistoryRowsFromSupabase(reportDate) {
+  if (!hasSupabaseConfig()) return []
+  const params = new URLSearchParams({
+    select: '*',
+    order: 'report_date.desc,imported_at.desc,row_id.asc',
+  })
+  if (reportDate) params.set('report_date', `eq.${reportDate}`)
+  const rows = await supabaseRequest(`/${supabaseOrdersHistoryTable}?${params.toString()}`)
+  return Array.isArray(rows) ? rows.map(normalizeOrdersHistoryDatabaseRow) : []
 }
 
 async function loadCallReportTeamsFromSupabase() {
@@ -3770,6 +3830,34 @@ const server = createServer(async (request, response) => {
       }, {
         'Cache-Control': 'no-store',
       })
+    }
+    return
+  }
+
+  if (requestUrl.pathname === '/api/orders-history' && request.method === 'GET') {
+    try {
+      const rows = await loadOrdersHistoryRowsFromSupabase(requestUrl.searchParams.get('date'))
+      sendJson(request, response, 200, { rows, updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
+    } catch (error) {
+      sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
+    }
+    return
+  }
+
+  if (requestUrl.pathname === '/api/orders-history' && request.method === 'POST') {
+    try {
+      const payload = await readJsonRequest(request)
+      const rows = Array.isArray(payload.rows) ? payload.rows.slice(0, 1000) : []
+      const reportDate = String(payload.reportDate ?? '').trim()
+      if (!rows.length || !/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+        sendJson(request, response, 400, { message: 'Expected rows and a valid reportDate.' }, { 'Cache-Control': 'no-store' })
+        return
+      }
+      await upsertOrdersHistoryRowsToSupabase(rows, reportDate, payload.sourceFileName)
+      const historyRows = await loadOrdersHistoryRowsFromSupabase(reportDate)
+      sendJson(request, response, 200, { rows: historyRows, savedCount: rows.length, updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
+    } catch (error) {
+      sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
     }
     return
   }

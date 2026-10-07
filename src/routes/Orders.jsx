@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
+import { loadOrdersHistory, saveOrdersHistory } from '../services/ordersHistory'
 import {
   buildOrderCsvLookup,
   enrichHubSpotOrders,
@@ -75,15 +76,21 @@ function Orders() {
   const [csvFileName, setCsvFileName] = useState('')
   const [csvError, setCsvError] = useState('')
   const [cellEdits, setCellEdits] = useState({})
+  const [activeView, setActiveView] = useState('current')
+  const [historyDate, setHistoryDate] = useState(todayIsoDate)
+  const [historyRows, setHistoryRows] = useState([])
+  const [saveStatus, setSaveStatus] = useState('idle')
+  const [saveMessage, setSaveMessage] = useState('')
 
   const enrichment = useMemo(
     () => csvLookup ? enrichHubSpotOrders(rows, csvLookup) : { rows, matchedCount: 0 },
     [csvLookup, rows],
   )
   const displayedRows = enrichment.rows
+  const visibleRows = activeView === 'history' ? historyRows : displayedRows
   const treatmentColorLookup = useMemo(() => {
     const lookup = new Map()
-    displayedRows.forEach((row) => {
+    visibleRows.forEach((row) => {
       const treatment = String(cellEdits[row.id]?.treatment ?? row.treatment ?? '')
         .replace(/^\d+x\s+/i, '')
         .trim()
@@ -92,7 +99,16 @@ function Orders() {
       }
     })
     return lookup
-  }, [cellEdits, displayedRows])
+  }, [cellEdits, visibleRows])
+
+  useEffect(() => {
+    if (!isUnlocked || activeView !== 'history') return undefined
+    let active = true
+    loadOrdersHistory(historyDate)
+      .then((loadedRows) => { if (active) setHistoryRows(loadedRows) })
+      .catch((loadError) => { if (active) setSaveMessage(loadError.message) })
+    return () => { active = false }
+  }, [activeView, historyDate, isUnlocked])
 
   useEffect(() => {
     if (!isUnlocked) return undefined
@@ -207,6 +223,54 @@ function Orders() {
     }))
   }
 
+  function materializeRow(row) {
+    return Object.fromEntries([
+      ['id', row.id],
+      ['rowId', row.rowId],
+      ['reportDate', row.reportDate],
+      ['sourceFileName', row.sourceFileName],
+      ['importedAt', row.importedAt],
+      ...orderHeaders.map(({ key }) => [
+        key,
+        Object.hasOwn(cellEdits[row.id] ?? {}, key) ? cellEdits[row.id][key] : displayCell(row, key),
+      ]),
+    ])
+  }
+
+  async function saveFinalResult() {
+    setSaveStatus('saving')
+    setSaveMessage('')
+    try {
+      await saveOrdersHistory(displayedRows.map(materializeRow), request.date, csvFileName)
+      setHistoryDate(request.date)
+      setSaveMessage(`${displayedRows.length} rows saved to historical data.`)
+    } catch (saveError) {
+      setSaveMessage(saveError.message || 'Could not save orders history.')
+    } finally {
+      setSaveStatus('idle')
+    }
+  }
+
+  async function saveHistoryRow(row) {
+    if (!cellEdits[row.id]) return
+    setSaveStatus('saving')
+    setSaveMessage('')
+    try {
+      const savedRows = await saveOrdersHistory([materializeRow(row)], row.reportDate || historyDate, row.sourceFileName)
+      setHistoryRows(savedRows)
+      setCellEdits((current) => {
+        const next = { ...current }
+        delete next[row.id]
+        return next
+      })
+      setSaveMessage('History change saved.')
+    } catch (saveError) {
+      setSaveMessage(saveError.message || 'Could not update orders history.')
+    } finally {
+      setSaveStatus('idle')
+    }
+  }
+
   function renderOrderCell(row, header) {
     const editableValue = readEditableValue(row, header.key)
 
@@ -221,6 +285,7 @@ function Orders() {
           type="text"
           value={editableValue}
           onChange={(event) => updateCell(row.id, header.key, event.target.value)}
+          onBlur={() => activeView === 'history' && saveHistoryRow(row)}
         />
       )
     }
@@ -232,6 +297,7 @@ function Orders() {
           className={`orders-status-select ${String(editableValue).toLowerCase()}`}
           value={editableValue}
           onChange={(event) => updateCell(row.id, header.key, event.target.value)}
+          onBlur={() => activeView === 'history' && saveHistoryRow(row)}
         >
           <option value="">{header.key === 'medicalForm' ? '' : 'Select'}</option>
           <option value="Yes">Yes</option>
@@ -248,6 +314,7 @@ function Orders() {
         type="text"
         value={editableValue}
         onChange={(event) => updateCell(row.id, header.key, event.target.value)}
+        onBlur={() => activeView === 'history' && saveHistoryRow(row)}
       />
     )
   }
@@ -262,7 +329,12 @@ function Orders() {
         </div>
         </div>
 
-        <form className="report-filters" aria-label="Orders date filter" onSubmit={submitDate}>
+        <div className="orders-view-tabs" aria-label="Orders views">
+          <button className={activeView === 'current' ? 'active' : ''} type="button" onClick={() => setActiveView('current')}>Current orders</button>
+          <button className={activeView === 'history' ? 'active' : ''} type="button" onClick={() => setActiveView('history')}>Historical data</button>
+        </div>
+
+        {activeView === 'current' ? <form className="report-filters" aria-label="Orders date filter" onSubmit={submitDate}>
         <span className="filter-label">Paid Date (All Pipelines)</span>
         <input
           aria-label="Paid date"
@@ -284,10 +356,21 @@ function Orders() {
             {csvFileName} · {enrichment.matchedCount}/{rows.length} matched
           </span>
         )}
-        </form>
+        <button className="filter-button orders-save-button" disabled={!csvLookup || displayedRows.length === 0 || saveStatus === 'saving'} type="button" onClick={saveFinalResult}>
+          {saveStatus === 'saving' ? 'Saving…' : 'Save final result'}
+        </button>
+        </form> : (
+          <div className="report-filters" aria-label="Orders history date filter">
+            <span className="filter-label">Saved report date</span>
+            <input aria-label="Saved report date" className="date-filter-input" type="date" value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} />
+            <span className="timezone-pill">{historyRows.length} saved rows</span>
+            {saveStatus === 'saving' && <span className="orders-upload-status">Saving change…</span>}
+          </div>
+        )}
 
         {error && <div className="report-alert" role="alert">{error}</div>}
         {csvError && <div className="report-alert" role="alert">{csvError}</div>}
+        {saveMessage && <div className="orders-save-message" role="status">{saveMessage}</div>}
 
         <div className="table-panel orders-panel">
           <div className="table-shell">
@@ -300,17 +383,19 @@ function Orders() {
               </tr>
             </thead>
             <tbody>
-              {displayedRows.map((row) => (
+              {visibleRows.map((row) => (
                 <tr key={row.id}>
                   {orderHeaders.map((header) => (
                     <td key={header.key}>{renderOrderCell(row, header)}</td>
                   ))}
                 </tr>
               ))}
-              {displayedRows.length === 0 && (
+              {visibleRows.length === 0 && (
                 <tr>
                   <td colSpan={orderHeaders.length}>
-                    {status === 'loading' ? 'Loading HubSpot orders…' : 'No paid orders found for this date'}
+                    {activeView === 'history'
+                      ? 'No historical data saved for this date'
+                      : status === 'loading' ? 'Loading HubSpot orders…' : 'No paid orders found for this date'}
                   </td>
                 </tr>
               )}
