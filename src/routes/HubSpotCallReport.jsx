@@ -23,6 +23,7 @@ const outboundCallerAssignments = [
       'Ailin Isabel',
       'MarÃ­a Claudia',
       'Alejandra Oyala',
+      'Carlos Vargas',
     ],
   },
   {
