@@ -14,6 +14,7 @@ const shopifyApiVersion = process.env.SHOPIFY_API_VERSION ?? '2026-01'
 const defaultShopifyStatusSheetCsvUrl = 'https://docs.google.com/spreadsheets/d/1uBJLgzyYtBnPxR9x-DuHRcJz1DTJm3YSK7halebtWLg/gviz/tq?tqx=out:csv&gid=608356906'
 const supabaseTrackingTable = process.env.SUPABASE_TRACKING_TABLE ?? 'tracking_dashboard'
 const supabasePaymentHistoryTable = process.env.SUPABASE_PAYMENT_HISTORY_TABLE ?? 'payment_history'
+const supabaseCallReportTeamsTable = process.env.SUPABASE_CALL_REPORT_TEAMS_TABLE ?? 'call_report_teams'
 const excludedTrackingOrderNumbers = readExcludedTrackingOrderNumbers()
 const overdueDaysThreshold = 5
 const manuallyDeliveredTrackingOrders = new Set([
@@ -1270,6 +1271,47 @@ async function getUspsAccessToken() {
   })
 
   return uspsAccessTokenRequest
+}
+
+async function loadCallReportTeamsFromSupabase() {
+  if (!hasSupabaseConfig()) {
+    throw new Error('Shared team storage is not configured.')
+  }
+
+  const params = new URLSearchParams({
+    select: 'assignments,updated_at',
+    config_id: 'eq.default',
+    limit: '1',
+  })
+  const rows = await supabaseRequest(`/${supabaseCallReportTeamsTable}?${params.toString()}`)
+  const row = Array.isArray(rows) ? rows[0] : null
+
+  return {
+    assignments: row?.assignments ?? null,
+    updatedAt: row?.updated_at ?? null,
+  }
+}
+
+async function saveCallReportTeamsToSupabase(assignments) {
+  if (!hasSupabaseConfig()) {
+    throw new Error('Shared team storage is not configured.')
+  }
+
+  const updatedAt = new Date().toISOString()
+
+  await supabaseRequest(`/${supabaseCallReportTeamsTable}?on_conflict=config_id`, {
+    method: 'POST',
+    headers: {
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: [{
+      config_id: 'default',
+      assignments,
+      updated_at: updatedAt,
+    }],
+  })
+
+  return { assignments, updatedAt }
 }
 
 function parseModernUspsTrackingRecord(record) {
@@ -3749,6 +3791,42 @@ const server = createServer(async (request, response) => {
       }, {
         'Cache-Control': 'no-store',
       })
+    }
+    return
+  }
+
+  if (requestUrl.pathname === '/api/hubspot/teams' && request.method === 'GET') {
+    try {
+      const teamConfig = await loadCallReportTeamsFromSupabase()
+      sendJson(request, response, 200, teamConfig, { 'Cache-Control': 'no-store' })
+    } catch (error) {
+      sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
+    }
+    return
+  }
+
+  if (requestUrl.pathname === '/api/hubspot/teams' && request.method === 'POST') {
+    try {
+      const payload = await readJsonRequest(request)
+      const assignments = payload.assignments
+      const isValid = assignments
+        && typeof assignments === 'object'
+        && !Array.isArray(assignments)
+        && Object.values(assignments).every((members) => (
+          Array.isArray(members)
+          && members.length <= 250
+          && members.every((name) => typeof name === 'string' && name.trim().length > 0 && name.length <= 160)
+        ))
+
+      if (!isValid) {
+        sendJson(request, response, 400, { message: 'Expected valid team assignments.' }, { 'Cache-Control': 'no-store' })
+        return
+      }
+
+      const savedConfig = await saveCallReportTeamsToSupabase(assignments)
+      sendJson(request, response, 200, savedConfig, { 'Cache-Control': 'no-store' })
+    } catch (error) {
+      sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
     }
     return
   }

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadActiveHubSpotOwners, loadHubSpotCallReport } from '../services/hubspotCallReport'
+import {
+  loadActiveHubSpotOwners,
+  loadHubSpotCallReport,
+  loadSharedCallReportTeams,
+  saveSharedCallReportTeams,
+} from '../services/hubspotCallReport'
 
 const reportTimeZone = 'America/New_York'
 const defaultAverageRuntimeMs = 45000
@@ -79,14 +84,18 @@ function readTeamAssignments() {
 
 function writeTeamAssignments(assignments) {
   try {
-    const storedAssignments = Object.fromEntries(
-      assignments.map((assignment) => [assignment.id, assignment.agentNames]),
-    )
-
-    window.localStorage.setItem(teamMembershipStorageKey, JSON.stringify(storedAssignments))
+    window.localStorage.setItem(teamMembershipStorageKey, JSON.stringify(serializeTeamAssignments(assignments)))
+    return true
   } catch {
-    // Team management still works for this session when local storage is unavailable.
+    // Keep the editor open so the user can see that persistence was unavailable.
+    return false
   }
+}
+
+function serializeTeamAssignments(assignments) {
+  return Object.fromEntries(
+    assignments.map((assignment) => [assignment.id, assignment.agentNames]),
+  )
 }
 
 function normalizePersonName(value) {
@@ -336,11 +345,28 @@ function HubSpotCallReport() {
   const [activeHubSpotOwners, setActiveHubSpotOwners] = useState([])
   const [teamManagerStatus, setTeamManagerStatus] = useState('idle')
   const [teamManagerError, setTeamManagerError] = useState('')
+  const [sharedTeamStatus, setSharedTeamStatus] = useState('loading')
   const [selectedTeamId, setSelectedTeamId] = useState(defaultOutboundCallerAssignments[0].id)
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [outboundAssignmentOverrides, setOutboundAssignmentOverrides] = useState(() => readOutboundAssignmentOverrides())
   const [draftOutboundAssignmentOverrides, setDraftOutboundAssignmentOverrides] = useState(() => readOutboundAssignmentOverrides())
   const averageRuntimeRef = useRef(averageRuntimeMs)
+
+  useEffect(() => {
+    loadSharedCallReportTeams()
+      .then((assignments) => {
+        if (assignments) {
+          const normalizedAssignments = normalizeTeamAssignments(assignments)
+          setTeamAssignments(normalizedAssignments)
+          setDraftTeamAssignments(normalizedAssignments)
+          writeTeamAssignments(normalizedAssignments)
+        }
+        setSharedTeamStatus('ready')
+      })
+      .catch(() => {
+        setSharedTeamStatus('error')
+      })
+  }, [])
 
   const recordRuntime = useCallback((durationMs) => {
     const nextAverageMs = (averageRuntimeRef.current * 0.7) + (durationMs * 0.3)
@@ -443,12 +469,22 @@ function HubSpotCallReport() {
     const selectedOwner = activeHubSpotOwners.find((owner) => owner.id === selectedMemberId)
     if (!selectedOwner) return
 
-    setDraftTeamAssignments((assignments) => assignments.map((assignment) => (
-      assignment.id === selectedTeamId
-        ? { ...assignment, agentNames: [...assignment.agentNames, selectedOwner.name] }
-        : assignment
-    )))
+    setDraftTeamAssignments((assignments) => addOwnerToTeam(
+      assignments,
+      selectedTeamId,
+      selectedOwner.name,
+    ))
     setSelectedMemberId('')
+  }
+
+  function addOwnerToTeam(assignments, teamId, ownerName) {
+    return assignments.map((assignment) => (
+      assignment.id === teamId && !assignment.agentNames.some((name) => (
+        normalizePersonName(name) === normalizePersonName(ownerName)
+      ))
+        ? { ...assignment, agentNames: [...assignment.agentNames, ownerName] }
+        : assignment
+    ))
   }
 
   function removeTeamMember(teamId, memberName) {
@@ -462,10 +498,30 @@ function HubSpotCallReport() {
     )))
   }
 
-  function saveTeamAssignments() {
-    writeTeamAssignments(draftTeamAssignments)
-    setTeamAssignments(draftTeamAssignments)
-    closeTeamManager()
+  async function saveTeamAssignments() {
+    const selectedOwner = activeHubSpotOwners.find((owner) => owner.id === selectedMemberId)
+    const assignmentsToSave = selectedOwner
+      ? addOwnerToTeam(draftTeamAssignments, selectedTeamId, selectedOwner.name)
+      : draftTeamAssignments
+
+    setTeamManagerStatus('saving')
+    setTeamManagerError('')
+
+    try {
+      const savedAssignments = await saveSharedCallReportTeams(serializeTeamAssignments(assignmentsToSave))
+      const normalizedAssignments = normalizeTeamAssignments(savedAssignments)
+
+      writeTeamAssignments(normalizedAssignments)
+      setDraftTeamAssignments(normalizedAssignments)
+      setTeamAssignments(normalizedAssignments)
+      setSharedTeamStatus('ready')
+      closeTeamManager()
+    } catch (saveError) {
+      setTeamManagerStatus('ready')
+      setSharedTeamStatus('error')
+      setTeamManagerError(saveError.message)
+      return
+    }
   }
 
   const scheduleRows = useMemo(() => {
@@ -1287,14 +1343,23 @@ function HubSpotCallReport() {
               </div>
               <div className="team-manager-footer">
                 <span>
-                  {teamManagerStatus === 'ready'
+                  {selectedMemberId
+                    ? 'The selected user will be added when you save.'
+                    : sharedTeamStatus === 'error'
+                      ? 'Shared team storage is unavailable.'
+                    : teamManagerStatus === 'ready'
                     ? `${activeHubSpotOwners.length} active HubSpot users available`
                     : 'HubSpot connection required to add members'}
                 </span>
                 <div>
                   <button className="filter-button" type="button" onClick={closeTeamManager}>Cancel</button>
-                  <button className="outbound-assignment-fetch" type="button" onClick={saveTeamAssignments}>
-                    Save Changes
+                  <button
+                    className="outbound-assignment-fetch"
+                    disabled={teamManagerStatus === 'saving'}
+                    type="button"
+                    onClick={saveTeamAssignments}
+                  >
+                    {teamManagerStatus === 'saving' ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </div>

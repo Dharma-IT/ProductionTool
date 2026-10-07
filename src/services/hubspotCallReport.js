@@ -222,6 +222,41 @@ export async function loadActiveHubSpotOwners() {
   return Array.isArray(payload.owners) ? payload.owners : []
 }
 
+function getHubSpotApiUrl(pathname) {
+  const configuredEndpoint = import.meta.env.VITE_HUBSPOT_CALL_REPORT_URL
+  const requestUrl = new URL(configuredEndpoint || '/api/hubspot/call-report', window.location.origin)
+
+  requestUrl.pathname = pathname
+  requestUrl.search = ''
+  return requestUrl
+}
+
+export async function loadSharedCallReportTeams() {
+  const response = await fetch(getHubSpotApiUrl('/api/hubspot/teams'), { cache: 'no-store' })
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(payload.message || `Unable to load shared teams (${response.status}).`)
+  }
+
+  return payload.assignments ?? null
+}
+
+export async function saveSharedCallReportTeams(assignments) {
+  const response = await fetch(getHubSpotApiUrl('/api/hubspot/teams'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignments }),
+  })
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(payload.message || `Unable to save shared teams (${response.status}).`)
+  }
+
+  return payload.assignments ?? assignments
+}
+
 export async function loadHubSpotCallReport(date, options = {}) {
   const endpoint = import.meta.env.VITE_HUBSPOT_CALL_REPORT_URL
 
