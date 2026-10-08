@@ -159,8 +159,15 @@ function isUntrackableDetoxTeaRow(row) {
   return normalizedItem.includes('detox tea') || normalizedItem.includes('te detox')
 }
 
+const excludedWarningCustomers = new Set([
+  'gladis ordonez',
+  'mclaudia hernandez',
+  'yaylin gonzales',
+  'yahadra saenz',
+])
+
 function isExcludedWarningCustomer(row) {
-  return normalizeWarningMatchText(row.name) === 'gladis ordonez'
+  return excludedWarningCustomers.has(normalizeWarningMatchText(row.name))
 }
 
 function getOrderWarningSummary(rows) {
