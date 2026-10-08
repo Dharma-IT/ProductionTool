@@ -742,6 +742,12 @@
   background: #ffedb8;
 }
 
+.orders-status-select.mismatch {
+  color: #735100;
+  background: #ffd84d;
+  border-color: #d6a900;
+}
+
 .orders-status-select.no {
   color: #9c2929;
   background: #ffd4cf;

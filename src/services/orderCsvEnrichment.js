@@ -72,6 +72,31 @@ function medicalProducts(value) {
   return products
 }
 
+function medicalDosage(value) {
+  const match = cleanCsvValue(value).match(/\b(\d+(?:\.\d+)?)\s*mg\b/i)
+  return match ? Number(match[1]) : null
+}
+
+function normalizedDosage(product, dosage) {
+  if (product === 'tirzepatide' && (dosage === 24 || dosage === 30)) return '24-30'
+  return dosage
+}
+
+function medicalProductMatches(treatment, purchase) {
+  const treatmentProducts = medicalProducts(treatment)
+  const purchaseProducts = medicalProducts(purchase)
+  const treatmentDosage = medicalDosage(treatment)
+  const purchaseDosage = medicalDosage(purchase)
+
+  return [...treatmentProducts].some((product) => {
+    if (!purchaseProducts.has(product)) return false
+    if (treatmentDosage === null && purchaseDosage === null) return true
+    if (treatmentDosage === null || purchaseDosage === null) return false
+
+    return normalizedDosage(product, treatmentDosage) === normalizedDosage(product, purchaseDosage)
+  })
+}
+
 function displayLanguage(value) {
   const language = cleanCsvValue(value)
   return /^es(?:[-_]|$)/i.test(language) ? 'Spanish' : language
@@ -157,12 +182,12 @@ export function enrichHubSpotOrders(orders, lookup) {
       address: '', city: '', state: '', zipCode: '',
     }
     const hubSpotProducts = medicalProducts(order.treatment)
-    const qualifyingMatch = matches.find((row) => {
-      const csvProducts = medicalProducts(row.purchase)
-      return [...hubSpotProducts].some((product) => csvProducts.has(product))
-    })
+    const qualifyingMatch = matches.find((row) => medicalProductMatches(order.treatment, row.purchase))
+    const hasSubmittedMedicalForm = matches.some((row) => medicalProducts(row.purchase).size > 0)
     const medicalStatus = hubSpotProducts.size > 0
-      ? qualifyingMatch && hasCompleteAddress(address) ? 'Yes' : 'Pending'
+      ? qualifyingMatch
+        ? hasCompleteAddress(address) ? 'Yes' : 'Pending'
+        : hasSubmittedMedicalForm ? 'Mismatch' : 'Pending'
       : ''
 
     return {

@@ -253,6 +253,7 @@ function Orders() {
           <option value="">{header.key === 'medicalForm' ? '' : 'Select'}</option>
           <option value="Yes">Yes</option>
           <option value="Pending">Pending</option>
+          {header.key === 'medicalForm' && <option value="Mismatch">Mismatch</option>}
           <option value="No">No</option>
         </select>
       )

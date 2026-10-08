@@ -84,8 +84,41 @@ test('requires the same medical product in HubSpot and the CSV', () => {
   const lookup = buildOrderCsvLookup([csvRow({ purchase: 'Sermorelin 60-Day Supply' })])
   const result = enrichHubSpotOrders([order()], lookup)
 
-  assert.equal(result.rows[0].medicalForm, 'Pending')
+  assert.equal(result.rows[0].medicalForm, 'Mismatch')
   assert.equal(result.rows[0].doctorPrescribed, '')
+})
+
+test('marks a different dosage of the same medical product as a mismatch', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ purchase: 'Personalized Tirzepatide+ 30mg' })])
+  const result = enrichHubSpotOrders([
+    order({ clientName: 'Danay Martin', treatment: '1x Compounded Tirzepatide 52mg' }),
+  ], lookup)
+
+  assert.equal(result.rows[0].medicalForm, 'Mismatch')
+})
+
+test('treats Tirzepatide 24mg and 30mg forms as equivalent', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ purchase: 'Personalized Tirzepatide+ 30mg' })])
+  const result = enrichHubSpotOrders([
+    order({ treatment: '1x Compounded Tirzepatide 24mg' }),
+  ], lookup)
+
+  assert.equal(result.rows[0].medicalForm, 'Yes')
+})
+
+test('requires other dosages to match exactly', () => {
+  const matchingLookup = buildOrderCsvLookup([csvRow({ purchase: 'Personalized Tirzepatide+ 52mg' })])
+  const mismatchingLookup = buildOrderCsvLookup([csvRow({ purchase: 'Personalized Tirzepatide+ 24mg' })])
+
+  assert.equal(enrichHubSpotOrders([order()], matchingLookup).rows[0].medicalForm, 'Yes')
+  assert.equal(enrichHubSpotOrders([order()], mismatchingLookup).rows[0].medicalForm, 'Mismatch')
+})
+
+test('keeps a missing medical form pending instead of marking it as a mismatch', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ purchase: 'Nutrition Consultation' })])
+  const result = enrichHubSpotOrders([order()], lookup)
+
+  assert.equal(result.rows[0].medicalForm, 'Pending')
 })
 
 test('treats matching Semaglutide as a medical product', () => {
