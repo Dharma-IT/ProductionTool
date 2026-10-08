@@ -229,6 +229,20 @@ function getReportDateRange(selectedDate) {
   }
 }
 
+// HubSpot date-picker properties are represented as midnight UTC. They need
+// UTC calendar-day boundaries rather than the timezone-aware boundaries used
+// by timestamp properties such as meetings and calls.
+function getDatePropertyRange(selectedDate) {
+  const reportDate = getReportDateRange(selectedDate).reportDate
+  const nextReportDate = addDaysToIsoDate(reportDate, 1)
+
+  return {
+    reportDate,
+    fromMs: String(new Date(`${reportDate}T00:00:00Z`).getTime()),
+    toMs: String(new Date(`${nextReportDate}T00:00:00Z`).getTime()),
+  }
+}
+
 function getReportCacheTtlMs(reportDate) {
   return reportDate === getZonedDate(new Date()) ? currentDateCacheTtlMs : pastDateCacheTtlMs
 }
@@ -2182,7 +2196,7 @@ function countItemsFromDealDescription(description) {
 }
 
 async function buildHubSpotOrdersReport(selectedDate) {
-  const range = getReportDateRange(selectedDate)
+  const range = getDatePropertyRange(selectedDate)
   const definitions = await loadDealPropertyDefinitions()
   const paidDateProperty = findDealProperty(definitions, [
     'Paid Date (All Pipelines)',
