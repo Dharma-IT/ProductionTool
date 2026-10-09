@@ -4,9 +4,12 @@ import { loadHubSpotOrders } from '../services/hubspotOrders'
 import { loadOrdersHistory, saveOrdersHistory } from '../services/ordersHistory'
 import {
   buildOrderCsvLookup,
+  buildStriveCsvLookup,
   enrichHubSpotOrders,
+  enrichStriveOrderNumbers,
   expandHubSpotOrderItems,
   validateOrderCsvHeaders,
+  validateStriveCsvHeaders,
 } from '../services/orderCsvEnrichment'
 
 const orderHeaders = [
@@ -69,6 +72,9 @@ function Orders() {
   const [csvLookup, setCsvLookup] = useState(null)
   const [csvFileName, setCsvFileName] = useState('')
   const [csvError, setCsvError] = useState('')
+  const [striveCsvLookup, setStriveCsvLookup] = useState(null)
+  const [striveCsvFileName, setStriveCsvFileName] = useState('')
+  const [striveCsvError, setStriveCsvError] = useState('')
   const [cellEdits, setCellEdits] = useState({})
   const [activeView, setActiveView] = useState('current')
   const [historyDate, setHistoryDate] = useState(todayIsoDate)
@@ -80,7 +86,13 @@ function Orders() {
     () => csvLookup ? enrichHubSpotOrders(rows, csvLookup) : { rows, matchedCount: 0 },
     [csvLookup, rows],
   )
-  const displayedRows = enrichment.rows
+  const striveEnrichment = useMemo(
+    () => striveCsvLookup
+      ? enrichStriveOrderNumbers(enrichment.rows, striveCsvLookup)
+      : { rows: enrichment.rows, matchedCount: 0, unmatchedCount: 0, ambiguousCount: 0 },
+    [enrichment, striveCsvLookup],
+  )
+  const displayedRows = striveEnrichment.rows
   const visibleRows = activeView === 'history' ? historyRows : displayedRows
   const treatmentColorLookup = useMemo(() => {
     const lookup = new Map()
@@ -129,6 +141,12 @@ function Orders() {
     event.preventDefault()
     setStatus('loading')
     setError('')
+    setCsvLookup(null)
+    setCsvFileName('')
+    setCsvError('')
+    setStriveCsvLookup(null)
+    setStriveCsvFileName('')
+    setStriveCsvError('')
     setRequest((current) => ({ date: selectedDate, sequence: current.sequence + 1 }))
   }
 
@@ -137,6 +155,9 @@ function Orders() {
     if (!file) return
 
     setCsvError('')
+    setStriveCsvLookup(null)
+    setStriveCsvFileName('')
+    setStriveCsvError('')
 
     try {
       const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
@@ -156,6 +177,35 @@ function Orders() {
       setCsvFileName(file.name)
     } catch (uploadError) {
       setCsvError(uploadError instanceof Error ? uploadError.message : 'Unable to read this CSV file.')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  async function uploadStriveCsv(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setStriveCsvError('')
+
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+      if (!worksheet) throw new Error('The Strive CSV does not contain a readable worksheet.')
+
+      const csvRows = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+      if (!csvRows.length) throw new Error('The Strive CSV does not contain any order rows.')
+
+      const headers = Object.keys(csvRows[0]).map((header) => header.trim())
+      const missingHeaders = validateStriveCsvHeaders(headers)
+      if (missingHeaders.length) {
+        throw new Error(`Missing required Strive columns: ${missingHeaders.join(', ')}`)
+      }
+
+      setStriveCsvLookup(buildStriveCsvLookup(csvRows))
+      setStriveCsvFileName(file.name)
+    } catch (uploadError) {
+      setStriveCsvError(uploadError instanceof Error ? uploadError.message : 'Unable to read this Strive CSV file.')
     } finally {
       event.target.value = ''
     }
@@ -308,6 +358,20 @@ function Orders() {
             {csvFileName} · {enrichment.matchedCount}/{rows.length} matched
           </span>
         )}
+        <label className={`filter-button orders-upload-button ${status !== 'ready' || !csvLookup ? 'disabled' : ''}`}>
+          Upload Strive CSV
+          <input
+            accept=".csv,text/csv"
+            disabled={status !== 'ready' || !csvLookup}
+            onChange={uploadStriveCsv}
+            type="file"
+          />
+        </label>
+        {striveCsvFileName && (
+          <span className="orders-upload-status" title={striveCsvFileName}>
+            {striveCsvFileName} · {striveEnrichment.matchedCount}/{displayedRows.length} matched · {striveEnrichment.unmatchedCount} unmatched · {striveEnrichment.ambiguousCount} medication mismatch
+          </span>
+        )}
         <button className="filter-button orders-save-button" disabled={!csvLookup || displayedRows.length === 0 || saveStatus === 'saving'} type="button" onClick={saveFinalResult}>
           {saveStatus === 'saving' ? 'Saving…' : 'Save final result'}
         </button>
@@ -322,6 +386,7 @@ function Orders() {
 
         {error && <div className="report-alert" role="alert">{error}</div>}
         {csvError && <div className="report-alert" role="alert">{csvError}</div>}
+        {striveCsvError && <div className="report-alert" role="alert">{striveCsvError}</div>}
         {saveMessage && <div className="orders-save-message" role="status">{saveMessage}</div>}
 
         <div className="table-panel orders-panel">

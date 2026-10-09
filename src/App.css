@@ -820,6 +820,20 @@
   background: var(--green-deep);
 }
 
+.orders-upload-button.disabled {
+  border-color: #cbd6e2;
+  color: #7c8b9a;
+  background: #e9eef3;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.orders-upload-button.disabled:hover {
+  border-color: #cbd6e2;
+  color: #7c8b9a;
+  background: #e9eef3;
+}
+
 .orders-upload-button input {
   position: absolute;
   width: 1px;

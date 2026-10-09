@@ -3,6 +3,8 @@ export const requiredOrderCsvHeaders = [
   'city', 'state', 'zip', 'purchase',
 ]
 
+export const requiredStriveCsvHeaders = ['First Name', 'Last Name', 'Medication', 'Order']
+
 const nullLikeValues = new Set(['null', 'undefined'])
 
 export function cleanCsvValue(value) {
@@ -23,6 +25,21 @@ function normalizeName(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+}
+
+function medicationFamily(value) {
+  const normalized = cleanCsvValue(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+
+  if (normalized.includes('tirzepatide')) return 'tirzepatide'
+  if (normalized.includes('semaglutide')) return 'semaglutide'
+  if (normalized.includes('sermorelin') || normalized.includes('sermorlin')) return 'sermorelin'
+  if (/\bghk\s*cu\b/.test(normalized)) return 'ghk-cu'
+  if (/\bnad\b/.test(normalized)) return 'nad+'
+  return ''
 }
 
 function parseFormattedAddress(value) {
@@ -109,6 +126,60 @@ function completionTime(row) {
 
 export function validateOrderCsvHeaders(headers) {
   return requiredOrderCsvHeaders.filter((header) => !headers.includes(header))
+}
+
+export function validateStriveCsvHeaders(headers) {
+  return requiredStriveCsvHeaders.filter((header) => !headers.includes(header))
+}
+
+export function buildStriveCsvLookup(csvRows) {
+  const byClientMedication = new Map()
+  const clientNames = new Set()
+
+  csvRows.forEach((rawRow) => {
+    const row = Object.fromEntries(
+      Object.entries(rawRow).map(([key, value]) => [cleanCsvValue(key), cleanCsvValue(value)]),
+    )
+    const clientName = normalizeName(`${row['First Name']} ${row['Last Name']}`)
+    const family = medicationFamily(row.Medication)
+    const orderNumber = cleanCsvValue(row.Order)
+    if (!clientName || !orderNumber) return
+
+    clientNames.add(clientName)
+    if (!family) return
+
+    const key = `${clientName}|${family}`
+    const orderNumbers = byClientMedication.get(key) ?? []
+    if (!orderNumbers.includes(orderNumber)) orderNumbers.push(orderNumber)
+    byClientMedication.set(key, orderNumbers)
+  })
+
+  return { byClientMedication, clientNames, rowCount: csvRows.length }
+}
+
+export function enrichStriveOrderNumbers(orders, lookup) {
+  let matchedCount = 0
+  let unmatchedCount = 0
+  let ambiguousCount = 0
+
+  const rows = orders.map((order) => {
+    const clientName = normalizeName(order.clientName)
+    const family = medicationFamily(order.treatment)
+    const orderNumbers = family
+      ? lookup.byClientMedication.get(`${clientName}|${family}`) ?? []
+      : []
+
+    if (orderNumbers.length) {
+      matchedCount += 1
+      return { ...order, striveOrderNumber1: orderNumbers.join(', ') }
+    }
+
+    if (clientName && lookup.clientNames.has(clientName)) ambiguousCount += 1
+    else unmatchedCount += 1
+    return order
+  })
+
+  return { rows, matchedCount, unmatchedCount, ambiguousCount }
 }
 
 function readTreatmentItems(treatment) {

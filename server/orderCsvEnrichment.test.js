@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildOrderCsvLookup,
+  buildStriveCsvLookup,
   enrichHubSpotOrders,
+  enrichStriveOrderNumbers,
   expandHubSpotOrderItems,
   validateOrderCsvHeaders,
+  validateStriveCsvHeaders,
 } from '../src/services/orderCsvEnrichment.js'
 
 function csvRow(overrides = {}) {
@@ -187,4 +190,61 @@ test('combines repeated identical products into one product row', () => {
   assert.equal(expanded.length, 1)
   assert.equal(expanded[0].clientName, 'Jeuz Vinci (5)')
   assert.equal(expanded[0].treatment, '5x GLP-1 Support')
+})
+
+test('validates the required Strive headers without requiring Strenght', () => {
+  assert.deepEqual(validateStriveCsvHeaders(['First Name', 'Last Name', 'Medication', 'Order', 'Strenght']), [])
+  assert.deepEqual(validateStriveCsvHeaders(['First Name', 'Medication']), ['Last Name', 'Order'])
+})
+
+test('matches normalized client names and medication families', () => {
+  const lookup = buildStriveCsvLookup([{
+    'First Name': 'Jeuz', 'Last Name': 'V\u00ednci', Medication: 'TIRZEPATIDE/GLYCINE/B12', Order: '11111',
+  }])
+  const result = enrichStriveOrderNumbers([
+    order({ clientName: '  JEUZ, VINCI (2) ', treatment: '1x Compounded Tirzepatide 52mg' }),
+  ], lookup)
+
+  assert.equal(result.matchedCount, 1)
+  assert.equal(result.rows[0].striveOrderNumber1, '11111')
+})
+
+test('combines distinct Strive order numbers in CSV order and ignores blanks and duplicates', () => {
+  const lookup = buildStriveCsvLookup([
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '11111' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '212222' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '11111' },
+  ])
+  const result = enrichStriveOrderNumbers([order()], lookup)
+
+  assert.equal(result.rows[0].striveOrderNumber1, '11111, 212222')
+})
+
+test('does not overwrite an existing Strive value when medication does not match', () => {
+  const lookup = buildStriveCsvLookup([{
+    'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'NAD+', Order: '99999',
+  }])
+  const result = enrichStriveOrderNumbers([
+    order({ striveOrderNumber1: 'existing' }),
+    order({ id: 'deal-2', clientName: 'Someone Else', striveOrderNumber1: 'also existing' }),
+  ], lookup)
+
+  assert.equal(result.rows[0].striveOrderNumber1, 'existing')
+  assert.equal(result.rows[1].striveOrderNumber1, 'also existing')
+  assert.equal(result.ambiguousCount, 1)
+  assert.equal(result.unmatchedCount, 1)
+})
+
+test('matches supported Strive medication aliases including NAD and GHK-Cu', () => {
+  const lookup = buildStriveCsvLookup([
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'NAD+', Order: '300' },
+    { 'First Name': 'Ana', 'Last Name': 'Calderon', Medication: 'GHK-CU peptide', Order: '400' },
+  ])
+  const result = enrichStriveOrderNumbers([
+    order({ treatment: '1x NAD+ 200mg' }),
+    order({ id: 'deal-2', clientName: 'Ana Calderon', treatment: '1x GHK-Cu Troches' }),
+  ], lookup)
+
+  assert.deepEqual(result.rows.map((row) => row.striveOrderNumber1), ['300', '400'])
 })
