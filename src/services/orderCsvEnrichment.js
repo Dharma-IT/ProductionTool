@@ -3,7 +3,7 @@ export const requiredOrderCsvHeaders = [
   'city', 'state', 'zip', 'purchase',
 ]
 
-export const requiredStriveCsvHeaders = ['First Name', 'Last Name', 'Medication', 'Order']
+export const requiredStriveCsvHeaders = ['First Name', 'Last Name', 'Medication', 'Order', 'Order Status']
 
 const nullLikeValues = new Set(['null', 'undefined'])
 
@@ -143,15 +143,27 @@ export function buildStriveCsvLookup(csvRows) {
     const clientName = normalizeName(`${row['First Name']} ${row['Last Name']}`)
     const family = medicationFamily(row.Medication)
     const orderNumber = cleanCsvValue(row.Order)
+    const orderStatus = cleanCsvValue(row['Order Status']).toLowerCase().replace(/\s+/g, ' ')
     if (!clientName || !orderNumber) return
 
     clientNames.add(clientName)
     if (!family) return
 
     const key = `${clientName}|${family}`
-    const orderNumbers = byClientMedication.get(key) ?? []
-    if (!orderNumbers.includes(orderNumber)) orderNumbers.push(orderNumber)
-    byClientMedication.set(key, orderNumbers)
+    const categorizedNumbers = byClientMedication.get(key) ?? {
+      strive: [],
+      onHold: [],
+      future: [],
+    }
+    const destination = orderStatus === 'complete processing' || orderStatus === 'completed orders'
+      ? categorizedNumbers.strive
+      : orderStatus === 'on hold'
+        ? categorizedNumbers.onHold
+        : orderStatus === 'future orders'
+          ? categorizedNumbers.future
+          : null
+    if (destination && !destination.includes(orderNumber)) destination.push(orderNumber)
+    byClientMedication.set(key, categorizedNumbers)
   })
 
   return { byClientMedication, clientNames, rowCount: csvRows.length }
@@ -165,13 +177,26 @@ export function enrichStriveOrderNumbers(orders, lookup) {
   const rows = orders.map((order) => {
     const clientName = normalizeName(order.clientName)
     const family = medicationFamily(order.treatment)
-    const orderNumbers = family
-      ? lookup.byClientMedication.get(`${clientName}|${family}`) ?? []
-      : []
+    const categorizedNumbers = family
+      ? lookup.byClientMedication.get(`${clientName}|${family}`)
+      : null
+    const hasImportedNumber = categorizedNumbers
+      && (categorizedNumbers.strive.length || categorizedNumbers.onHold.length || categorizedNumbers.future.length)
 
-    if (orderNumbers.length) {
+    if (hasImportedNumber) {
       matchedCount += 1
-      return { ...order, striveOrderNumber1: orderNumbers.join(', ') }
+      return {
+        ...order,
+        ...(categorizedNumbers.strive.length
+          ? { striveOrderNumber1: categorizedNumbers.strive.join(', ') }
+          : {}),
+        ...(categorizedNumbers.onHold.length
+          ? { striveOrderNumber2: categorizedNumbers.onHold.join(', ') }
+          : {}),
+        ...(categorizedNumbers.future.length
+          ? { futureOrderNumber: categorizedNumbers.future.join(', ') }
+          : {}),
+      }
     }
 
     if (clientName && lookup.clientNames.has(clientName)) ambiguousCount += 1

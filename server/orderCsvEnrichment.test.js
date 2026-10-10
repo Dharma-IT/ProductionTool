@@ -193,13 +193,18 @@ test('combines repeated identical products into one product row', () => {
 })
 
 test('validates the required Strive headers without requiring Strenght', () => {
-  assert.deepEqual(validateStriveCsvHeaders(['First Name', 'Last Name', 'Medication', 'Order', 'Strenght']), [])
-  assert.deepEqual(validateStriveCsvHeaders(['First Name', 'Medication']), ['Last Name', 'Order'])
+  assert.deepEqual(validateStriveCsvHeaders([
+    'First Name', 'Last Name', 'Medication', 'Order', 'Order Status', 'Strenght',
+  ]), [])
+  assert.deepEqual(validateStriveCsvHeaders(['First Name', 'Medication']), [
+    'Last Name', 'Order', 'Order Status',
+  ])
 })
 
 test('matches normalized client names and medication families', () => {
   const lookup = buildStriveCsvLookup([{
-    'First Name': 'Jeuz', 'Last Name': 'V\u00ednci', Medication: 'TIRZEPATIDE/GLYCINE/B12', Order: '11111',
+    'First Name': 'Jeuz', 'Last Name': 'V\u00ednci', Medication: 'TIRZEPATIDE/GLYCINE/B12',
+    Order: '11111', 'Order Status': 'Complete Processing',
   }])
   const result = enrichStriveOrderNumbers([
     order({ clientName: '  JEUZ, VINCI (2) ', treatment: '1x Compounded Tirzepatide 52mg' }),
@@ -211,10 +216,10 @@ test('matches normalized client names and medication families', () => {
 
 test('combines distinct Strive order numbers in CSV order and ignores blanks and duplicates', () => {
   const lookup = buildStriveCsvLookup([
-    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '11111' },
-    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '' },
-    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '212222' },
-    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '11111' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '11111', 'Order Status': 'Complete Processing' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '', 'Order Status': 'Complete Processing' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '212222', 'Order Status': 'Complete Processing' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '11111', 'Order Status': 'Complete Processing' },
   ])
   const result = enrichStriveOrderNumbers([order()], lookup)
 
@@ -224,6 +229,7 @@ test('combines distinct Strive order numbers in CSV order and ignores blanks and
 test('does not overwrite an existing Strive value when medication does not match', () => {
   const lookup = buildStriveCsvLookup([{
     'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'NAD+', Order: '99999',
+    'Order Status': 'Complete Processing',
   }])
   const result = enrichStriveOrderNumbers([
     order({ striveOrderNumber1: 'existing' }),
@@ -238,8 +244,8 @@ test('does not overwrite an existing Strive value when medication does not match
 
 test('matches supported Strive medication aliases including NAD and GHK-Cu', () => {
   const lookup = buildStriveCsvLookup([
-    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'NAD+', Order: '300' },
-    { 'First Name': 'Ana', 'Last Name': 'Calderon', Medication: 'GHK-CU peptide', Order: '400' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'NAD+', Order: '300', 'Order Status': 'Complete Processing' },
+    { 'First Name': 'Ana', 'Last Name': 'Calderon', Medication: 'GHK-CU peptide', Order: '400', 'Order Status': 'Complete Processing' },
   ])
   const result = enrichStriveOrderNumbers([
     order({ treatment: '1x NAD+ 200mg' }),
@@ -247,4 +253,18 @@ test('matches supported Strive medication aliases including NAD and GHK-Cu', () 
   ], lookup)
 
   assert.deepEqual(result.rows.map((row) => row.striveOrderNumber1), ['300', '400'])
+})
+
+test('routes Strive numbers into columns by order status', () => {
+  const lookup = buildStriveCsvLookup([
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '100', 'Order Status': 'Complete Processing' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '200', 'Order Status': 'On Hold' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '300', 'Order Status': 'Future Orders' },
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '400', 'Order Status': 'Completed Orders' },
+  ])
+  const result = enrichStriveOrderNumbers([order()], lookup)
+
+  assert.equal(result.rows[0].striveOrderNumber1, '100, 400')
+  assert.equal(result.rows[0].striveOrderNumber2, '200')
+  assert.equal(result.rows[0].futureOrderNumber, '300')
 })
