@@ -458,6 +458,20 @@
 }
 .orders-view-tabs button.active { color: #fff; background: var(--green); }
 .orders-save-button { border-color: #9b6a00; color: #fff; background: #9b6a00; }
+.orders-export-select {
+  min-height: 34px;
+  padding: 0 30px 0 12px;
+  border: 1px solid rgba(0, 86, 63, 0.34);
+  color: var(--green);
+  background: #f4fbf7;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.orders-export-select:hover:not(:disabled),
+.orders-export-select:focus-visible { border-color: var(--green); background-color: #e7f5ec; }
+.orders-export-select:disabled { cursor: not-allowed; opacity: 0.5; }
 .orders-save-message { margin: 10px 0; color: var(--green); font-size: 0.82rem; font-weight: 850; }
 
 .orders-route {

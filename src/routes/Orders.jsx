@@ -239,6 +239,42 @@ function Orders() {
     ])
   }
 
+  function exportVisibleRows(format) {
+    if (visibleRows.length === 0) return
+
+    const exportRows = visibleRows.map((row) => Object.fromEntries(
+      orderHeaders.map(({ key, label }) => [label, readEditableValue(row, key)]),
+    ))
+    const worksheet = XLSX.utils.json_to_sheet(exportRows, {
+      header: orderHeaders.map(({ label }) => label),
+    })
+    worksheet['!cols'] = orderHeaders.map(({ label }) => ({
+      wch: Math.min(50, Math.max(label.length + 2, 14)),
+    }))
+
+    const reportDate = activeView === 'history' ? historyDate : request.date
+    const filename = `orders-${activeView}-${reportDate}`
+
+    if (format === 'csv') {
+      const csv = XLSX.utils.sheet_to_csv(worksheet)
+      const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+
+      link.href = url
+      link.download = `${filename}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      return
+    }
+
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders')
+    XLSX.writeFile(workbook, `${filename}.xlsx`)
+  }
+
   async function saveFinalResult() {
     setSaveStatus('saving')
     setSaveMessage('')
@@ -376,12 +412,40 @@ function Orders() {
         <button className="filter-button orders-save-button" disabled={!csvLookup || displayedRows.length === 0 || saveStatus === 'saving'} type="button" onClick={saveFinalResult}>
           {saveStatus === 'saving' ? 'Saving…' : 'Save final result'}
         </button>
+        <select
+          aria-label="Export current orders"
+          className="orders-export-select"
+          defaultValue=""
+          disabled={visibleRows.length === 0}
+          onChange={(event) => {
+            exportVisibleRows(event.target.value)
+            event.target.value = ''
+          }}
+        >
+          <option disabled value="">Export…</option>
+          <option value="csv">CSV</option>
+          <option value="xlsx">Excel (.xlsx)</option>
+        </select>
         </form> : (
           <div className="report-filters" aria-label="Orders history date filter">
             <span className="filter-label">Saved report date</span>
             <input aria-label="Saved report date" className="date-filter-input" type="date" value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} />
             <span className="timezone-pill">{historyRows.length} saved rows</span>
             {saveStatus === 'saving' && <span className="orders-upload-status">Saving change…</span>}
+            <select
+              aria-label="Export historical orders"
+              className="orders-export-select"
+              defaultValue=""
+              disabled={visibleRows.length === 0}
+              onChange={(event) => {
+                exportVisibleRows(event.target.value)
+                event.target.value = ''
+              }}
+            >
+              <option disabled value="">Export…</option>
+              <option value="csv">CSV</option>
+              <option value="xlsx">Excel (.xlsx)</option>
+            </select>
           </div>
         )}
 
