@@ -39,8 +39,17 @@ SHOPIFY_CLIENT_ID=your-client-id
 SHOPIFY_CLIENT_SECRET=your-client-secret
 AIRCALL_API_ID=your-aircall-api-id
 AIRCALL_API_TOKEN=your-aircall-api-token
+AIRCALL_WEBHOOK_TOKEN=your-aircall-webhook-token
 AIRCALL_ANALYTICS_ACCESS_TOKEN=your-aircall-analytics-oauth-access-token
+SUPABASE_REST_URL=https://your-project.supabase.co/rest/v1
+SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+SUPABASE_AIRCALL_CALLS_TABLE=aircall_calls
 ```
+
+Run `supabase/aircall_calls.sql` in the Supabase SQL editor, then configure Aircall's
+`call.ended` webhook to post to `https://your-render-service.onrender.com/api/aircall/webhook`.
+The service-role key must only be stored in Render and must never be exposed through a
+`VITE_` environment variable or committed to the repository.
 
 The Shopify API uses the client credentials to request expiring Admin API access tokens and refreshes them automatically before expiry. `SHOPIFY_ADMIN_ACCESS_TOKEN` can be set as a fallback for legacy/admin-created apps.
 

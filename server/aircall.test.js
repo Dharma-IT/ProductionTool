@@ -1,9 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildAircallDatabaseRow,
   fetchAircallCalls,
   mergeCallSources,
   normalizeAircallCall,
+  normalizeAircallDatabaseRow,
+  verifyAircallWebhookToken,
 } from './aircall.js'
 
 test('normalizes an answered outbound call for the existing matcher', () => {
@@ -17,6 +20,38 @@ test('normalizes an answered outbound call for the existing matcher', () => {
   })
 
   assert.deepEqual(call, {
+    callId: 'aircall:42',
+    source: 'aircall',
+    callerName: 'Laura Example',
+    callTime: '2026-10-20T05:00:00.000Z',
+    callTitle: '',
+    phoneNumber: '17815205625',
+    direction: 'OUTBOUND',
+    disposition: 'CONNECTED',
+  })
+})
+
+test('validates webhook tokens without accepting empty or mismatched values', () => {
+  assert.equal(verifyAircallWebhookToken('secret', 'secret'), true)
+  assert.equal(verifyAircallWebhookToken('wrong', 'secret'), false)
+  assert.equal(verifyAircallWebhookToken('', ''), false)
+})
+
+test('round-trips a webhook call through the protected database shape', () => {
+  const call = {
+    id: 42,
+    direction: 'outbound',
+    raw_digits: '+1 (781) 520-5625',
+    started_at: 1792472400,
+    answered_at: 1792472410,
+    ended_at: 1792472454,
+    user: { id: 7, name: 'Laura Example' },
+  }
+  const row = buildAircallDatabaseRow(call)
+
+  assert.equal(row.call_id, '42')
+  assert.equal(row.normalized_phone, '17815205625')
+  assert.deepEqual(normalizeAircallDatabaseRow(row), {
     callId: 'aircall:42',
     source: 'aircall',
     callerName: 'Laura Example',
