@@ -48,7 +48,7 @@ const stripeVerificationCache = new Map()
 let sheetStatusCache = null
 const currentDateCacheTtlMs = 5 * 60 * 1000
 const pastDateCacheTtlMs = 24 * 60 * 60 * 1000
-const callReportCacheVersion = 'contact-call-v14-aircall'
+const callReportCacheVersion = 'contact-call-v15-aircall-fallback'
 const inFlightReports = new Map()
 const inFlightTrackingReports = new Map()
 const reportErrors = new Map()
@@ -3572,8 +3572,10 @@ async function buildCallReport(selectedDate) {
     }),
   ])
   const hubspotCalls = sortCallsForMatching(outboundCalls.map((call) => normalizeCall(call, owners)))
-  const calls = sortCallsForMatching(mergeCallSources(hubspotCalls, aircallCalls))
-  const callIndexes = buildCallCandidateIndexes(calls)
+  const uniqueAircallCalls = mergeCallSources(hubspotCalls, aircallCalls)
+    .filter((call) => call.source === 'aircall')
+  const hubspotCallIndexes = buildCallCandidateIndexes(hubspotCalls)
+  const aircallCallIndexes = buildCallCandidateIndexes(uniqueAircallCalls)
   const [contactIdsByCallId, contactIdsByMeetingId] = await Promise.all([
     loadContactIdsByCallId(hubspotCalls.map((call) => call.callId)),
     loadContactIdsByMeetingId(scheduleResult.rows.map((meeting) => meeting.id)),
@@ -3584,7 +3586,7 @@ async function buildCallReport(selectedDate) {
       ...contactIdsByMeetingId.values(),
     ].flat(),
   )
-  const callsByContactId = calls.reduce((lookup, call) => {
+  const callsByContactId = hubspotCalls.reduce((lookup, call) => {
     const contactIds = contactIdsByCallId.get(String(call.callId)) ?? []
 
     contactIds.forEach((contactId) => {
@@ -3598,7 +3600,7 @@ async function buildCallReport(selectedDate) {
   callsByContactId.forEach((contactCalls, contactId) => {
     callsByContactId.set(contactId, sortCallsForMatching(contactCalls))
   })
-  const callsByContactEmail = calls.reduce((lookup, call) => {
+  const callsByContactEmail = hubspotCalls.reduce((lookup, call) => {
     const contactEmails = (contactIdsByCallId.get(String(call.callId)) ?? [])
       .map((contactId) => contactDetailsById.get(String(contactId))?.email)
       .filter(Boolean)
@@ -3669,28 +3671,53 @@ async function buildCallReport(selectedDate) {
         ...row,
         matchPhoneNumbers: associatedPhoneNumbers,
       }
-      const contactTimelineCall = findPriorOutboundCall(row, contactCalls, {
+      const hubspotContactTimelineCall = findPriorOutboundCall(row, contactCalls, {
         requireMeetingMatch: false,
         preSorted: true,
       })
-      const fallbackCandidateCalls = contactTimelineCall ? [] : getFallbackCandidateCalls(matchingRow, callIndexes)
-      const fallbackCall = contactTimelineCall
-        ? null
-        : findPriorOutboundCall(matchingRow, fallbackCandidateCalls, { preSorted: true })
-      const matchingCall = contactTimelineCall ?? fallbackCall
-      const qualifyingCalls = contactTimelineCall
-        ? getPriorOutboundCalls(row, contactCalls, { requireMeetingMatch: false, preSorted: true })
-        : getPriorOutboundCalls(matchingRow, fallbackCandidateCalls, { preSorted: true })
-      const previousDayContactCalls = getPreviousDayOutboundCalls(row, contactCalls, {
-        requireMeetingMatch: false,
-        preSorted: true,
-      })
-      const previousDayFallbackCalls = previousDayContactCalls.length > 0
+      const hubspotFallbackCandidateCalls = hubspotContactTimelineCall
         ? []
-        : getPreviousDayOutboundCalls(matchingRow, getFallbackCandidateCalls(matchingRow, callIndexes), { preSorted: true })
-      const previousDayCalls = previousDayContactCalls.length > 0
-        ? previousDayContactCalls
-        : previousDayFallbackCalls
+        : getFallbackCandidateCalls(matchingRow, hubspotCallIndexes)
+      const hubspotFallbackCall = hubspotContactTimelineCall
+        ? null
+        : findPriorOutboundCall(matchingRow, hubspotFallbackCandidateCalls, { preSorted: true })
+      const hubspotMatchingCall = hubspotContactTimelineCall ?? hubspotFallbackCall
+      const aircallCandidateCalls = hubspotMatchingCall
+        ? []
+        : getFallbackCandidateCalls(matchingRow, aircallCallIndexes)
+      const aircallMatchingCall = hubspotMatchingCall
+        ? null
+        : findPriorOutboundCall(matchingRow, aircallCandidateCalls, { preSorted: true })
+      const matchingCall = hubspotMatchingCall ?? aircallMatchingCall
+      const qualifyingCalls = hubspotContactTimelineCall
+        ? getPriorOutboundCalls(row, contactCalls, { requireMeetingMatch: false, preSorted: true })
+        : hubspotFallbackCall
+          ? getPriorOutboundCalls(matchingRow, hubspotFallbackCandidateCalls, { preSorted: true })
+          : getPriorOutboundCalls(matchingRow, aircallCandidateCalls, { preSorted: true })
+      const previousDayHubspotContactCalls = getPreviousDayOutboundCalls(row, contactCalls, {
+        requireMeetingMatch: false,
+        preSorted: true,
+      })
+      const previousDayHubspotFallbackCalls = previousDayHubspotContactCalls.length > 0
+        ? []
+        : getPreviousDayOutboundCalls(
+          matchingRow,
+          getFallbackCandidateCalls(matchingRow, hubspotCallIndexes),
+          { preSorted: true },
+        )
+      const previousDayHubspotCalls = previousDayHubspotContactCalls.length > 0
+        ? previousDayHubspotContactCalls
+        : previousDayHubspotFallbackCalls
+      const previousDayAircallCalls = previousDayHubspotCalls.length > 0
+        ? []
+        : getPreviousDayOutboundCalls(
+          matchingRow,
+          getFallbackCandidateCalls(matchingRow, aircallCallIndexes),
+          { preSorted: true },
+        )
+      const previousDayCalls = previousDayHubspotCalls.length > 0
+        ? previousDayHubspotCalls
+        : previousDayAircallCalls
       const previousDayCall = previousDayCalls[0]
       const connectedCallPhoneNumbers = [...new Set(
         previousDayCalls
@@ -3720,11 +3747,11 @@ async function buildCallReport(selectedDate) {
         previousDayCallers: [...new Set(previousDayCalls.map((call) => call.callerName).filter(Boolean))],
         previousDayConnected: previousDayCalls.some((call) => call.disposition === 'CONNECTED'),
         previousDayCalledDetail: previousDayCall
-          ? `${previousDayContactCalls.length > 0 ? 'Previous day contact timeline' : 'Previous day matched'} ${previousDayCall.disposition || 'outbound call'} at ${displayTime(previousDayCall.callTime)}`
+          ? `${previousDayCall.source === 'aircall' ? 'Aircall previous day matched' : previousDayHubspotContactCalls.length > 0 ? 'HubSpot previous day contact timeline' : 'HubSpot previous day matched'} ${previousDayCall.disposition || 'outbound call'} at ${displayTime(previousDayCall.callTime)}`
           : 'No previous-day outbound call found',
         called: matchingCall ? 'Called' : outboundExempt ? 'Not Required' : 'Not Called',
         calledDetail: matchingCall
-          ? `${contactTimelineCall ? 'Contact timeline' : 'Matched'} ${matchingCall.disposition || 'outbound call'} at ${displayTime(matchingCall.callTime)}`
+          ? `${matchingCall.source === 'aircall' ? 'Aircall fallback matched' : hubspotContactTimelineCall ? 'HubSpot contact timeline' : 'HubSpot matched'} ${matchingCall.disposition || 'outbound call'} at ${displayTime(matchingCall.callTime)}`
           : outboundExempt
             ? 'Outbound call not required: meeting was created within 2 hours of the appointment'
             : 'No same-day outbound call found before the appointment',
