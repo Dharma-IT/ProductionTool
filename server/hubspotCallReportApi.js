@@ -4060,9 +4060,15 @@ const server = createServer(async (request, response) => {
 
     if (forceRefresh) {
       reportErrors.delete(cacheKey)
+      reportCache.delete(cacheKey)
     }
 
-    if (!forceRefresh && cachedReport && Date.now() - cachedReport.cachedAt < (cachedReport.ttlMs ?? currentDateCacheTtlMs)) {
+    if (
+      !forceRefresh
+      && !inFlightReports.has(cacheKey)
+      && cachedReport
+      && Date.now() - cachedReport.cachedAt < (cachedReport.ttlMs ?? currentDateCacheTtlMs)
+    ) {
       sendJson(request, response, 200, {
         ...cachedReport.payload,
         cacheSource: 'server-memory',
