@@ -1,5 +1,3 @@
-import { timingSafeEqual } from 'node:crypto'
-
 const aircallBaseUrl = 'https://api.aircall.io/v1'
 
 function asIsoTimestamp(value) {
@@ -32,15 +30,6 @@ export function hasAircallApiConfig(env = process.env) {
   return Boolean(String(env.AIRCALL_API_ID ?? '').trim() && String(env.AIRCALL_API_TOKEN ?? '').trim())
 }
 
-export function verifyAircallWebhookToken(receivedToken, expectedToken) {
-  const received = Buffer.from(String(receivedToken ?? ''))
-  const expected = Buffer.from(String(expectedToken ?? ''))
-
-  return received.length > 0
-    && received.length === expected.length
-    && timingSafeEqual(received, expected)
-}
-
 export function normalizeAircallCall(call) {
   const callTime = asIsoTimestamp(call?.started_at ?? call?.created_at)
   const answered = Boolean(call?.answered_at)
@@ -54,38 +43,6 @@ export function normalizeAircallCall(call) {
     phoneNumber: normalizePhone(call?.raw_digits),
     direction: String(call?.direction ?? '').toUpperCase(),
     disposition: answered ? 'CONNECTED' : String(call?.status ?? 'OUTBOUND').toUpperCase(),
-  }
-}
-
-export function buildAircallDatabaseRow(call, event = 'call.ended') {
-  return {
-    call_id: String(call?.id ?? ''),
-    direction: String(call?.direction ?? '').toLowerCase(),
-    raw_digits: String(call?.raw_digits ?? ''),
-    normalized_phone: normalizePhone(call?.raw_digits),
-    user_id: call?.user?.id === undefined ? null : String(call.user.id),
-    user_name: readCallerName(call) || null,
-    started_at: asIsoTimestamp(call?.started_at ?? call?.created_at),
-    answered_at: asIsoTimestamp(call?.answered_at),
-    ended_at: asIsoTimestamp(call?.ended_at),
-    status: call?.status ? String(call.status) : null,
-    missed_call_reason: call?.missed_call_reason ? String(call.missed_call_reason) : null,
-    event_name: event,
-    raw_data: call,
-    received_at: new Date().toISOString(),
-  }
-}
-
-export function normalizeAircallDatabaseRow(row) {
-  return {
-    callId: `aircall:${row?.call_id}`,
-    source: 'aircall',
-    callerName: String(row?.user_name ?? '').trim(),
-    callTime: asIsoTimestamp(row?.started_at),
-    callTitle: '',
-    phoneNumber: normalizePhone(row?.normalized_phone ?? row?.raw_digits),
-    direction: String(row?.direction ?? '').toUpperCase(),
-    disposition: row?.answered_at ? 'CONNECTED' : String(row?.status ?? 'OUTBOUND').toUpperCase(),
   }
 }
 

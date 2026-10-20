@@ -4,13 +4,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { productPriceCatalog } from './productPriceCatalog.js'
 import {
-  buildAircallDatabaseRow,
   fetchAircallCalls,
   hasAircallApiConfig,
   normalizeAircallCall,
-  normalizeAircallDatabaseRow,
-  verifyAircallWebhookToken,
 } from './aircall.js'
+import { fetchAircallAnalyticsCalls } from './aircallAnalytics.js'
 
 loadLocalEnv()
 
@@ -24,7 +22,6 @@ const supabaseTrackingTable = process.env.SUPABASE_TRACKING_TABLE ?? 'tracking_d
 const supabasePaymentHistoryTable = process.env.SUPABASE_PAYMENT_HISTORY_TABLE ?? 'payment_history'
 const supabaseOrdersHistoryTable = process.env.SUPABASE_ORDERS_HISTORY_TABLE ?? 'orders_history'
 const supabaseCallReportTeamsTable = process.env.SUPABASE_CALL_REPORT_TEAMS_TABLE ?? 'call_report_teams'
-const supabaseAircallCallsTable = process.env.SUPABASE_AIRCALL_CALLS_TABLE ?? 'aircall_calls'
 const excludedTrackingOrderNumbers = readExcludedTrackingOrderNumbers()
 const overdueDaysThreshold = 5
 const manuallyDeliveredTrackingOrders = new Set([
@@ -781,57 +778,26 @@ async function supabaseRequest(path, options = {}) {
   return text ? JSON.parse(text) : null
 }
 
-async function saveAircallCall(call, eventName) {
-  if (!hasSupabaseConfig()) {
-    throw new Error('Supabase configuration is required to persist Aircall webhooks')
-  }
-
-  const row = buildAircallDatabaseRow(call, eventName)
-  if (!row.call_id) throw new Error('Aircall webhook is missing data.id')
-
-  await supabaseRequest(`/${supabaseAircallCallsTable}?on_conflict=call_id`, {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: row,
-  })
-
-  completedCallReports.clear()
-  return row
-}
-
 async function loadAircallOutboundCallsForDate(selectedDate) {
   const range = getReportDateRange(selectedDate)
-  const [apiCalls, storedCalls] = await Promise.all([
+  const analyticsFromDate = addDaysToIsoDate(range.reportDate, -2)
+  const [apiCalls, analyticsCalls] = await Promise.all([
     hasAircallApiConfig()
       ? fetchAircallCalls({ from: range.priorFromMs, to: range.toMs })
         .then((calls) => calls.map(normalizeAircallCall))
       : [],
-    loadStoredAircallCalls(range).catch((error) => {
-      console.error(`Stored Aircall calls unavailable: ${error.message}`)
-      return []
-    }),
+    fetchAircallAnalyticsCalls({ fromDate: analyticsFromDate, toDate: range.reportDate })
+      .catch((error) => {
+        console.error(`Aircall Analytics calls unavailable: ${error.message}`)
+        return []
+      }),
   ])
 
   return [...new Map(
-    [...apiCalls, ...storedCalls].map((call) => [String(call.callId), call]),
+    [...apiCalls, ...analyticsCalls].map((call) => [String(call.callId), call]),
   ).values()]
     .filter((call) => call.callId !== 'aircall:undefined')
     .filter((call) => call.direction === 'OUTBOUND' && call.callTime && call.phoneNumber)
-}
-
-async function loadStoredAircallCalls(range) {
-  if (!hasSupabaseConfig()) return []
-
-  const params = new URLSearchParams({
-    select: 'call_id,direction,raw_digits,normalized_phone,user_name,started_at,answered_at,status',
-    direction: 'eq.outbound',
-    and: `(started_at.gte.${new Date(Number(range.priorFromMs)).toISOString()},started_at.lt.${new Date(Number(range.toMs)).toISOString()})`,
-    order: 'started_at.asc',
-    limit: '10000',
-  })
-
-  const rows = await supabaseRequest(`/${supabaseAircallCallsTable}?${params.toString()}`)
-  return (rows ?? []).map(normalizeAircallDatabaseRow)
 }
 
 function buildTrackingDatabaseRow(row, sourceUpdatedAt) {
@@ -3964,40 +3930,6 @@ const server = createServer(async (request, response) => {
       sendJson(request, response, 200, { rows: historyRows, savedCount: rows.length, updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
     } catch (error) {
       sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
-    }
-    return
-  }
-
-  if (requestUrl.pathname === '/api/aircall/webhook' && request.method === 'POST') {
-    try {
-      const expectedToken = String(process.env.AIRCALL_WEBHOOK_TOKEN ?? '').trim()
-      if (!expectedToken) {
-        sendJson(request, response, 503, { message: 'Aircall webhook is not configured.' }, { 'Cache-Control': 'no-store' })
-        return
-      }
-
-      const payload = await readJsonRequest(request)
-      if (!verifyAircallWebhookToken(payload.token, expectedToken)) {
-        sendJson(request, response, 401, { message: 'Invalid Aircall webhook token.' }, { 'Cache-Control': 'no-store' })
-        return
-      }
-
-      if (payload.event !== 'call.ended') {
-        sendJson(request, response, 200, { accepted: false, ignored: true }, { 'Cache-Control': 'no-store' })
-        return
-      }
-
-      if (!payload.data?.id) {
-        sendJson(request, response, 400, { message: 'Aircall webhook is missing call data.' }, { 'Cache-Control': 'no-store' })
-        return
-      }
-
-      sendJson(request, response, 200, { accepted: true }, { 'Cache-Control': 'no-store' })
-      saveAircallCall(payload.data, payload.event).catch((error) => {
-        console.error(`Unable to persist Aircall call ${payload.data.id}: ${error.message}`)
-      })
-    } catch (error) {
-      sendJson(request, response, 400, { message: error.message }, { 'Cache-Control': 'no-store' })
     }
     return
   }

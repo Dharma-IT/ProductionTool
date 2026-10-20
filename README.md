@@ -39,7 +39,7 @@ SHOPIFY_CLIENT_ID=your-client-id
 SHOPIFY_CLIENT_SECRET=your-client-secret
 AIRCALL_API_ID=your-aircall-api-id
 AIRCALL_API_TOKEN=your-aircall-api-token
-AIRCALL_WEBHOOK_TOKEN=your-aircall-webhook-token
+AIRCALL_ANALYTICS_ACCESS_TOKEN=your-aircall-analytics-oauth-access-token
 ```
 
 The Shopify API uses the client credentials to request expiring Admin API access tokens and refreshes them automatically before expiry. `SHOPIFY_ADMIN_ACCESS_TOKEN` can be set as a fallback for legacy/admin-created apps.
@@ -70,10 +70,4 @@ The HubSpot token must only be set on Render. Do not add `HUBSPOT_PRIVATE_APP_TO
 
 ### Aircall call fallback
 
-Run `supabase/aircall_calls.sql` once in the Supabase SQL editor, then configure an Aircall webhook for the `call.ended` event:
-
-```txt
-https://your-render-service.onrender.com/api/aircall/webhook
-```
-
-The webhook stores finalized calls for auditing. Call reports also query Aircall directly for the selected date window, so historical calls and missed webhook deliveries can still be matched. Aircall credentials and the webhook token must only be configured on the backend.
+Call reports query Aircall directly for the selected date window. The Public Calls API uses the API ID and token. Historical calls that are absent from the Public API, including calls from deleted numbers, are retrieved through Analytics `CALLS_HISTORY` exports when `AIRCALL_ANALYTICS_ACCESS_TOKEN` is configured. Aircall credentials must only be configured on the backend.

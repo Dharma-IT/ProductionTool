@@ -18,5 +18,5 @@ services:
         sync: false
       - key: AIRCALL_API_TOKEN
         sync: false
-      - key: AIRCALL_WEBHOOK_TOKEN
+      - key: AIRCALL_ANALYTICS_ACCESS_TOKEN
         sync: false

@@ -1,11 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  buildAircallDatabaseRow,
   fetchAircallCalls,
   mergeCallSources,
   normalizeAircallCall,
-  verifyAircallWebhookToken,
 } from './aircall.js'
 
 test('normalizes an answered outbound call for the existing matcher', () => {
@@ -28,26 +26,6 @@ test('normalizes an answered outbound call for the existing matcher', () => {
     direction: 'OUTBOUND',
     disposition: 'CONNECTED',
   })
-})
-
-test('validates webhook tokens without accepting missing or partial tokens', () => {
-  assert.equal(verifyAircallWebhookToken('secret-token', 'secret-token'), true)
-  assert.equal(verifyAircallWebhookToken('secret', 'secret-token'), false)
-  assert.equal(verifyAircallWebhookToken('', ''), false)
-})
-
-test('builds an idempotent database row from a webhook call', () => {
-  const row = buildAircallDatabaseRow({
-    id: 42,
-    direction: 'outbound',
-    raw_digits: '+17815205625',
-    started_at: 1792472400,
-    user: { id: 7, first_name: 'Laura', last_name: 'Example' },
-  })
-
-  assert.equal(row.call_id, '42')
-  assert.equal(row.normalized_phone, '17815205625')
-  assert.equal(row.user_name, 'Laura Example')
 })
 
 test('keeps Aircall-only calls and removes cross-source duplicates', () => {
