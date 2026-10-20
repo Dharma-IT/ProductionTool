@@ -14,3 +14,9 @@ services:
         value: America/New_York
       - key: HUBSPOT_REPORT_DAY
         value: today
+      - key: AIRCALL_API_ID
+        sync: false
+      - key: AIRCALL_API_TOKEN
+        sync: false
+      - key: AIRCALL_WEBHOOK_TOKEN
+        sync: false

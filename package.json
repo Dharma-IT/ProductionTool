@@ -11,6 +11,7 @@
   "scripts": {
     "api": "node server/hubspotCallReportApi.js",
     "start": "node server/hubspotCallReportApi.js",
+    "test": "node --test server/*.test.js",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
