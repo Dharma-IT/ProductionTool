@@ -76,6 +76,19 @@ export function buildAircallDatabaseRow(call, event = 'call.ended') {
   }
 }
 
+export function normalizeAircallDatabaseRow(row) {
+  return {
+    callId: `aircall:${row?.call_id}`,
+    source: 'aircall',
+    callerName: String(row?.user_name ?? '').trim(),
+    callTime: asIsoTimestamp(row?.started_at),
+    callTitle: '',
+    phoneNumber: normalizePhone(row?.normalized_phone ?? row?.raw_digits),
+    direction: String(row?.direction ?? '').toUpperCase(),
+    disposition: row?.answered_at ? 'CONNECTED' : String(row?.status ?? 'OUTBOUND').toUpperCase(),
+  }
+}
+
 export async function fetchAircallCalls({ from, to, env = process.env, fetchImpl = fetch }) {
   if (!hasAircallApiConfig(env)) return []
 

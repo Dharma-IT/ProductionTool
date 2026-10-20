@@ -20,6 +20,13 @@ create index if not exists aircall_calls_phone_idx on public.aircall_calls (norm
 
 alter table public.aircall_calls enable row level security;
 
+drop policy if exists "aircall calls anon read" on public.aircall_calls;
+create policy "aircall calls anon read"
+on public.aircall_calls
+for select
+to anon
+using (true);
+
 drop policy if exists "aircall calls anon insert" on public.aircall_calls;
 create policy "aircall calls anon insert"
 on public.aircall_calls
@@ -36,4 +43,4 @@ using (true)
 with check (true);
 
 grant usage on schema public to anon;
-grant insert, update on public.aircall_calls to anon;
+grant select, insert, update on public.aircall_calls to anon;

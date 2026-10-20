@@ -668,9 +668,8 @@ function HubSpotCallReport() {
 
       const meetingHost = agentRows.meetingHosts.get(normalizePersonName(rosterAgentName))
       const callerNames = shouldUseCurrentDayCalling ? row.qualifyingCallers : row.previousDayCallers
-      const previousDayCalledByAssignedCaller = (!shouldUseCurrentDayCalling && row.previousDayConnected)
-        || (callerNames ?? [])
-          .some((callerName) => normalizePersonName(callerName) === assignedCallerKey)
+      const previousDayCalledByAssignedCaller = (callerNames ?? [])
+        .some((callerName) => normalizePersonName(callerName) === assignedCallerKey)
 
       agentRows.totalAppointments += 1
       meetingHost.totalAppointments += 1

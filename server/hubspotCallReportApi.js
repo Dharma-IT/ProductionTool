@@ -7,8 +7,8 @@ import {
   buildAircallDatabaseRow,
   fetchAircallCalls,
   hasAircallApiConfig,
-  mergeCallSources,
   normalizeAircallCall,
+  normalizeAircallDatabaseRow,
   verifyAircallWebhookToken,
 } from './aircall.js'
 
@@ -800,15 +800,38 @@ async function saveAircallCall(call, eventName) {
 }
 
 async function loadAircallOutboundCallsForDate(selectedDate) {
-  if (!hasAircallApiConfig()) return []
-
   const range = getReportDateRange(selectedDate)
-  const calls = await fetchAircallCalls({ from: range.priorFromMs, to: range.toMs })
+  const [apiCalls, storedCalls] = await Promise.all([
+    hasAircallApiConfig()
+      ? fetchAircallCalls({ from: range.priorFromMs, to: range.toMs })
+        .then((calls) => calls.map(normalizeAircallCall))
+      : [],
+    loadStoredAircallCalls(range).catch((error) => {
+      console.error(`Stored Aircall calls unavailable: ${error.message}`)
+      return []
+    }),
+  ])
 
-  return calls
-    .map(normalizeAircallCall)
+  return [...new Map(
+    [...apiCalls, ...storedCalls].map((call) => [String(call.callId), call]),
+  ).values()]
     .filter((call) => call.callId !== 'aircall:undefined')
     .filter((call) => call.direction === 'OUTBOUND' && call.callTime && call.phoneNumber)
+}
+
+async function loadStoredAircallCalls(range) {
+  if (!hasSupabaseConfig()) return []
+
+  const params = new URLSearchParams({
+    select: 'call_id,direction,raw_digits,normalized_phone,user_name,started_at,answered_at,status',
+    direction: 'eq.outbound',
+    and: `(started_at.gte.${new Date(Number(range.priorFromMs)).toISOString()},started_at.lt.${new Date(Number(range.toMs)).toISOString()})`,
+    order: 'started_at.asc',
+    limit: '10000',
+  })
+
+  const rows = await supabaseRequest(`/${supabaseAircallCallsTable}?${params.toString()}`)
+  return (rows ?? []).map(normalizeAircallDatabaseRow)
 }
 
 function buildTrackingDatabaseRow(row, sourceUpdatedAt) {
@@ -3566,10 +3589,8 @@ async function buildCallReport(selectedDate) {
     }),
   ])
   const hubspotCalls = sortCallsForMatching(outboundCalls.map((call) => normalizeCall(call, owners)))
-  const uniqueAircallCalls = mergeCallSources(hubspotCalls, aircallCalls)
-    .filter((call) => call.source === 'aircall')
   const hubspotCallIndexes = buildCallCandidateIndexes(hubspotCalls)
-  const aircallCallIndexes = buildCallCandidateIndexes(uniqueAircallCalls)
+  const aircallCallIndexes = buildCallCandidateIndexes(aircallCalls)
   const [contactIdsByCallId, contactIdsByMeetingId] = await Promise.all([
     loadContactIdsByCallId(hubspotCalls.map((call) => call.callId)),
     loadContactIdsByMeetingId(scheduleResult.rows.map((meeting) => meeting.id)),
@@ -3676,18 +3697,25 @@ async function buildCallReport(selectedDate) {
         ? null
         : findPriorOutboundCall(matchingRow, hubspotFallbackCandidateCalls, { preSorted: true })
       const hubspotMatchingCall = hubspotContactTimelineCall ?? hubspotFallbackCall
-      const aircallCandidateCalls = hubspotMatchingCall
-        ? []
-        : getFallbackCandidateCalls(matchingRow, aircallCallIndexes)
+      const aircallCandidateCalls = getFallbackCandidateCalls(matchingRow, aircallCallIndexes)
       const aircallMatchingCall = hubspotMatchingCall
         ? null
         : findPriorOutboundCall(matchingRow, aircallCandidateCalls, { preSorted: true })
       const matchingCall = hubspotMatchingCall ?? aircallMatchingCall
-      const qualifyingCalls = hubspotContactTimelineCall
+      const qualifyingHubspotCalls = hubspotContactTimelineCall
         ? getPriorOutboundCalls(row, contactCalls, { requireMeetingMatch: false, preSorted: true })
         : hubspotFallbackCall
           ? getPriorOutboundCalls(matchingRow, hubspotFallbackCandidateCalls, { preSorted: true })
-          : getPriorOutboundCalls(matchingRow, aircallCandidateCalls, { preSorted: true })
+          : []
+      const qualifyingAircallCalls = getPriorOutboundCalls(
+        matchingRow,
+        aircallCandidateCalls,
+        { preSorted: true },
+      )
+      const qualifyingCalls = [...new Map(
+        [...qualifyingHubspotCalls, ...qualifyingAircallCalls]
+          .map((call) => [String(call.callId), call]),
+      ).values()]
       const previousDayHubspotContactCalls = getPreviousDayOutboundCalls(row, contactCalls, {
         requireMeetingMatch: false,
         preSorted: true,
@@ -3702,16 +3730,15 @@ async function buildCallReport(selectedDate) {
       const previousDayHubspotCalls = previousDayHubspotContactCalls.length > 0
         ? previousDayHubspotContactCalls
         : previousDayHubspotFallbackCalls
-      const previousDayAircallCalls = previousDayHubspotCalls.length > 0
-        ? []
-        : getPreviousDayOutboundCalls(
-          matchingRow,
-          getFallbackCandidateCalls(matchingRow, aircallCallIndexes),
-          { preSorted: true },
-        )
-      const previousDayCalls = previousDayHubspotCalls.length > 0
-        ? previousDayHubspotCalls
-        : previousDayAircallCalls
+      const previousDayAircallCalls = getPreviousDayOutboundCalls(
+        matchingRow,
+        getFallbackCandidateCalls(matchingRow, aircallCallIndexes),
+        { preSorted: true },
+      )
+      const previousDayCalls = [...new Map(
+        [...previousDayHubspotCalls, ...previousDayAircallCalls]
+          .map((call) => [String(call.callId), call]),
+      ).values()].sort(sortCallsByConnectionAndTime)
       const previousDayCall = previousDayCalls[0]
       const connectedCallPhoneNumbers = [...new Set(
         previousDayCalls
