@@ -8,8 +8,6 @@ const agentRoster = [
 
 const reportTimes = ['2:00 AM', '2:20 AM', '2:30 AM', '2:40 AM', '3:00 AM', '3:20 AM', '3:30 AM']
 const reportTimeZone = 'America/New_York'
-const sessionCachePrefix = 'hubspot-call-report'
-const sessionCacheVersion = 'v13-aircall-fallback'
 const defaultPollIntervalMs = 8000
 const defaultMaxPollingMs = 15 * 60 * 1000
 
@@ -167,28 +165,6 @@ function normalizeHubSpotCall(call) {
   }
 }
 
-function getSessionCacheKey(date) {
-  return `${sessionCachePrefix}:${sessionCacheVersion}:${date ?? 'default'}`
-}
-
-function readCachedReport(date) {
-  try {
-    const cachedValue = window.sessionStorage.getItem(getSessionCacheKey(date))
-
-    return cachedValue ? JSON.parse(cachedValue) : null
-  } catch {
-    return null
-  }
-}
-
-function writeCachedReport(date, report) {
-  try {
-    window.sessionStorage.setItem(getSessionCacheKey(date), JSON.stringify(report))
-  } catch {
-    // The app can still work if session storage is disabled or full.
-  }
-}
-
 function delay(milliseconds) {
   return new Promise((resolveDelay) => {
     window.setTimeout(resolveDelay, milliseconds)
@@ -269,15 +245,6 @@ export async function loadHubSpotCallReport(date, options = {}) {
     }
   }
 
-  const cachedReport = options.forceRefresh ? null : readCachedReport(date)
-  if (cachedReport) {
-    return {
-      ...cachedReport,
-      source: cachedReport.source ?? 'hubspot',
-      cacheSource: 'session',
-    }
-  }
-
   const startedAt = Date.now()
   let shouldForceRefresh = Boolean(options.forceRefresh)
 
@@ -306,7 +273,7 @@ export async function loadHubSpotCallReport(date, options = {}) {
 
     try {
       response = await fetch(requestUrl, {
-        cache: shouldForceRefresh ? 'no-store' : 'default',
+        cache: 'no-store',
         signal: controller.signal,
       })
     } catch (error) {
@@ -366,10 +333,7 @@ export async function loadHubSpotCallReport(date, options = {}) {
     callerAnalytics: payload.callerAnalytics ?? [],
     reportDate: payload.reportDate ?? getYesterdayDate(),
     updatedAt: payload.updatedAt ?? new Date().toISOString(),
-    cacheSource: payload.cacheSource ?? 'network',
   }
-
-  writeCachedReport(date, report)
 
   return report
 }

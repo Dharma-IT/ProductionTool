@@ -41,14 +41,13 @@ const trackingBusinessDateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'numeric',
   day: 'numeric',
 })
-const reportCache = new Map()
+const completedCallReports = new Map()
 const trackingCache = new Map()
 const uspsTrackingCache = new Map()
 const stripeVerificationCache = new Map()
 let sheetStatusCache = null
 const currentDateCacheTtlMs = 5 * 60 * 1000
 const pastDateCacheTtlMs = 24 * 60 * 60 * 1000
-const callReportCacheVersion = 'contact-call-v15-aircall-fallback'
 const inFlightReports = new Map()
 const inFlightTrackingReports = new Map()
 const reportErrors = new Map()
@@ -56,7 +55,6 @@ const hubspotMaxAttempts = 6
 const hubspotRequestSpacingMs = 250
 const uspsTrackingCacheTtlMs = 30 * 60 * 1000
 const stripeVerificationCacheTtlMs = 5 * 60 * 1000
-const callReportErrorTtlMs = 2 * 60 * 1000
 const shopifyAccessTokenRefreshBufferMs = 5 * 60 * 1000
 let lastHubspotRequestAt = 0
 let hubspotRequestQueue = Promise.resolve()
@@ -264,7 +262,7 @@ function getApiCacheHeaders(ttlMs) {
   }
 }
 
-function cacheCallReport(cacheKey, report) {
+function completeCallReport(jobKey, report) {
   const payload = {
     source: 'hubspot',
     updatedAt: new Date().toISOString(),
@@ -273,34 +271,30 @@ function cacheCallReport(cacheKey, report) {
     callerAnalytics: report.callerAnalytics,
   }
 
-  reportCache.set(cacheKey, {
-    cachedAt: Date.now(),
-    ttlMs: getReportCacheTtlMs(report.reportDate),
-    payload,
-  })
-  reportErrors.delete(cacheKey)
+  completedCallReports.set(jobKey, payload)
+  reportErrors.delete(jobKey)
 
   return payload
 }
 
-function startCallReportBuild(cacheKey, selectedDate) {
-  const existingReportPromise = inFlightReports.get(cacheKey)
+function startCallReportBuild(jobKey, selectedDate) {
+  const existingReportPromise = inFlightReports.get(jobKey)
   if (existingReportPromise) return existingReportPromise
 
   const reportPromise = buildCallReport(selectedDate)
-    .then((report) => cacheCallReport(cacheKey, report))
+    .then((report) => completeCallReport(jobKey, report))
     .catch((error) => {
-      reportErrors.set(cacheKey, {
+      reportErrors.set(jobKey, {
         message: error.message,
         failedAt: new Date().toISOString(),
       })
       return null
     })
     .finally(() => {
-      inFlightReports.delete(cacheKey)
+      inFlightReports.delete(jobKey)
     })
 
-  inFlightReports.set(cacheKey, reportPromise)
+  inFlightReports.set(jobKey, reportPromise)
 
   return reportPromise
 }
@@ -801,7 +795,7 @@ async function saveAircallCall(call, eventName) {
     body: row,
   })
 
-  reportCache.clear()
+  completedCallReports.clear()
   return row
 }
 
@@ -4055,35 +4049,24 @@ const server = createServer(async (request, response) => {
   if (requestUrl.pathname === '/api/hubspot/call-report' && request.method === 'GET') {
     const selectedDate = requestUrl.searchParams.get('date')
     const forceRefresh = requestUrl.searchParams.get('refresh') === '1'
-    const cacheKey = `${callReportCacheVersion}:${selectedDate || 'default'}`
-    const cachedReport = reportCache.get(cacheKey)
+    const reportJobKey = selectedDate || 'default'
 
     if (forceRefresh) {
-      reportErrors.delete(cacheKey)
-      reportCache.delete(cacheKey)
+      reportErrors.delete(reportJobKey)
+      completedCallReports.delete(reportJobKey)
     }
 
-    if (
-      !forceRefresh
-      && !inFlightReports.has(cacheKey)
-      && cachedReport
-      && Date.now() - cachedReport.cachedAt < (cachedReport.ttlMs ?? currentDateCacheTtlMs)
-    ) {
-      sendJson(request, response, 200, {
-        ...cachedReport.payload,
-        cacheSource: 'server-memory',
-      }, getApiCacheHeaders(cachedReport.ttlMs ?? currentDateCacheTtlMs))
+    const completedReport = completedCallReports.get(reportJobKey)
+    if (!forceRefresh && !inFlightReports.has(reportJobKey) && completedReport) {
+      completedCallReports.delete(reportJobKey)
+      sendJson(request, response, 200, completedReport, { 'Cache-Control': 'no-store' })
       return
     }
 
-    const reportError = reportErrors.get(cacheKey)
+    const reportError = reportErrors.get(reportJobKey)
 
-    if (
-      !forceRefresh
-      && reportError
-      && !inFlightReports.has(cacheKey)
-      && Date.now() - new Date(reportError.failedAt).getTime() < callReportErrorTtlMs
-    ) {
+    if (!forceRefresh && reportError && !inFlightReports.has(reportJobKey)) {
+      reportErrors.delete(reportJobKey)
       sendJson(request, response, 500, {
         message: reportError.message,
         failedAt: reportError.failedAt,
@@ -4093,11 +4076,7 @@ const server = createServer(async (request, response) => {
       return
     }
 
-    if (reportError && Date.now() - new Date(reportError.failedAt).getTime() >= callReportErrorTtlMs) {
-      reportErrors.delete(cacheKey)
-    }
-
-    startCallReportBuild(cacheKey, selectedDate)
+    startCallReportBuild(reportJobKey, selectedDate)
     sendJson(request, response, 202, {
       source: 'hubspot',
       status: 'building',
