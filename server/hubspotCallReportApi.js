@@ -2216,6 +2216,59 @@ async function loadAssociatedContactIdsByDealId(dealIds) {
   return contactIdsByDealId
 }
 
+async function loadAssociatedLineItemIdsByDealId(dealIds) {
+  const lineItemIdsByDealId = new Map()
+
+  try {
+    for (const dealIdChunk of chunkArray(dealIds, 100)) {
+      const payload = await hubspotFetch('/crm/v4/associations/deals/line_items/batch/read', {
+        method: 'POST',
+        body: { inputs: dealIdChunk.map((id) => ({ id })) },
+      })
+
+      ;(payload.results ?? []).forEach((result) => {
+        lineItemIdsByDealId.set(String(result.from?.id ?? ''), (result.to ?? [])
+          .map((association) => String(association.toObjectId ?? ''))
+          .filter(Boolean))
+      })
+    }
+  } catch (error) {
+    if (/403|scope|permission/i.test(error.message)) {
+      throw new Error('The HubSpot private app needs the crm.objects.line_items.read scope before Items Report [FINANCE] data can be loaded.', { cause: error })
+    }
+    throw error
+  }
+
+  return lineItemIdsByDealId
+}
+
+async function loadOrderLineItemsById(lineItemIds) {
+  const lineItemsById = new Map()
+
+  try {
+    for (const lineItemIdChunk of chunkArray([...new Set(lineItemIds)], 100)) {
+      const payload = await hubspotFetch('/crm/v3/objects/line_items/batch/read', {
+        method: 'POST',
+        body: {
+          properties: ['name', 'quantity'],
+          inputs: lineItemIdChunk.map((id) => ({ id })),
+        },
+      })
+
+      ;(payload.results ?? []).forEach((lineItem) => {
+        lineItemsById.set(String(lineItem.id), lineItem.properties ?? {})
+      })
+    }
+  } catch (error) {
+    if (/403|scope|permission/i.test(error.message)) {
+      throw new Error('The HubSpot private app needs the crm.objects.line_items.read scope before Items Report [FINANCE] data can be loaded.', { cause: error })
+    }
+    throw error
+  }
+
+  return lineItemsById
+}
+
 async function loadOrderContactsById(contactIds) {
   const contactsById = new Map()
   const properties = [
@@ -2252,14 +2305,6 @@ async function loadOrderContactsById(contactIds) {
   return contactsById
 }
 
-function countItemsFromDealDescription(description) {
-  const quantities = [...String(description ?? '').matchAll(/(?:^|[,;+\s])(\d+)\s*x\b/gi)]
-    .map((match) => Number(match[1]))
-    .filter((quantity) => Number.isFinite(quantity) && quantity > 0)
-
-  return quantities.length ? quantities.reduce((total, quantity) => total + quantity, 0) : 1
-}
-
 async function buildHubSpotOrdersReport(selectedDate) {
   const range = getDatePropertyRange(selectedDate)
   const definitions = await loadDealPropertyDefinitions()
@@ -2268,16 +2313,9 @@ async function buildHubSpotOrdersReport(selectedDate) {
     'Paid Date All Pipelines',
     'Paid Date',
   ], ['paid_date_all_pipelines', 'paid_date'])
-  const descriptionProperty = findDealProperty(definitions, [
-    'Deal Description (Aggregate)',
-    'Deal Description',
-  ], ['deal_description', 'description'])
 
   if (!paidDateProperty) {
     throw new Error('Could not find the HubSpot deal property “Paid Date (All Pipelines)”.')
-  }
-  if (!descriptionProperty) {
-    throw new Error('Could not find the HubSpot deal property “Deal Description”.')
   }
 
   const deals = await hubspotSearch('deals', {
@@ -2287,49 +2325,62 @@ async function buildHubSpotOrdersReport(selectedDate) {
         { propertyName: paidDateProperty, operator: 'LT', value: range.toMs },
       ],
     }],
-    properties: [paidDateProperty, descriptionProperty, 'hubspot_owner_id'],
+    properties: [paidDateProperty, 'dealname', 'dealstage', 'hubspot_owner_id'],
     limit: 100,
     sorts: [paidDateProperty],
   })
   const dealIds = deals.map((deal) => String(deal.id))
-  const [owners, contactIdsByDealId] = await Promise.all([
+  const [owners, contactIdsByDealId, lineItemIdsByDealId] = await Promise.all([
     loadOwners(),
     loadAssociatedContactIdsByDealId(dealIds),
+    loadAssociatedLineItemIdsByDealId(dealIds),
   ])
-  const contactsById = await loadOrderContactsById(
-    [...contactIdsByDealId.values()].flat(),
-  )
+  const [contactsById, lineItemsById] = await Promise.all([
+    loadOrderContactsById([...contactIdsByDealId.values()].flat()),
+    loadOrderLineItemsById([...lineItemIdsByDealId.values()].flat()),
+  ])
+  const dealStageProperty = definitions.find((property) => property.name === 'dealstage')
+  const dealStageLabels = new Map((dealStageProperty?.options ?? [])
+    .map((option) => [String(option.value), option.label]))
 
-  const rows = deals.map((deal) => {
+  const rows = deals.flatMap((deal) => {
     const properties = deal.properties ?? {}
+    const dealName = properties.dealname ?? ''
+    const dealStage = dealStageLabels.get(String(properties.dealstage)) ?? properties.dealstage ?? ''
+    const exclusionText = `${dealName} ${dealStage}`
+    if (/refund|dispute\s+won/i.test(exclusionText)) return []
+
     const contactId = contactIdsByDealId.get(String(deal.id))?.[0]
     const contact = contactsById.get(contactId) ?? {}
-    const description = properties[descriptionProperty] ?? ''
-    const itemCount = countItemsFromDealDescription(description)
     const clientName = [contact.firstname, contact.lastname].filter(Boolean).join(' ').trim()
+    const lineItemIds = lineItemIdsByDealId.get(String(deal.id)) ?? []
 
-    return {
-      id: String(deal.id),
-      number: contact.phone || contact.mobilephone || '',
-      clientName: `${clientName || 'Unknown client'}${itemCount > 1 ? ` (${itemCount})` : ''}`,
-      treatment: description,
-      purchaseDate: properties[paidDateProperty] ?? '',
-      seller: readFirstOwnerName(owners, properties.hubspot_owner_id),
-      language: contact.hs_language
-        || contact.preffered_language
-        || contact.idioma_hablado
-        || contact.idioma_en_es
-        || contact.hs_inferred_language_codes
-        || '',
-      address: [contact.address, contact.street_address_2].filter(Boolean).join(', '),
-      city: contact.city ?? '',
-      state: contact.state ?? '',
-      zipCode: contact.zip ?? '',
-    }
+    return lineItemIds.map((lineItemId) => {
+      const lineItem = lineItemsById.get(lineItemId) ?? {}
+      const quantity = Math.max(1, Number(lineItem.quantity) || 1)
+      return {
+        id: `${deal.id}:item-${lineItemId}`,
+        number: contact.phone || contact.mobilephone || '',
+        clientName: `${clientName || 'Unknown client'}${quantity > 1 ? ` (${quantity})` : ''}`,
+        treatment: lineItem.name ? `${quantity}x ${lineItem.name}` : '',
+        purchaseDate: properties[paidDateProperty] ?? '',
+        seller: readFirstOwnerName(owners, properties.hubspot_owner_id),
+        language: contact.hs_language
+          || contact.preffered_language
+          || contact.idioma_hablado
+          || contact.idioma_en_es
+          || contact.hs_inferred_language_codes
+          || '',
+        address: [contact.address, contact.street_address_2].filter(Boolean).join(', '),
+        city: contact.city ?? '',
+        state: contact.state ?? '',
+        zipCode: contact.zip ?? '',
+      }
+    })
   })
 
   return {
-    source: 'hubspot',
+    source: 'hubspot-items-finance',
     reportDate: range.reportDate,
     paidDateProperty,
     rows,
