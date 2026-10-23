@@ -1868,7 +1868,9 @@ async function buildShopifyTrackingReport(options = {}) {
   const { orders, pageCount, hitPageLimit } = await loadShopifyOrders({
     status: 'any',
     limit: pageLimit,
-    order: 'created_at asc',
+    // Fetch newest orders first so a configured page cap can only truncate
+    // older history, never the most recent Shopify orders.
+    order: 'created_at desc',
     created_at_min: createdAtMin,
     fields,
   })
