@@ -59,3 +59,18 @@ test('cancellation prevents fetching more batches', async () => {
   }, { signal: controller.signal }), { name: 'AbortError' })
   assert.equal(calls, 1)
 })
+
+test('risk cutoff uses calendar days: includes day 30 and excludes day 31, including failed deliveries', () => {
+  const today = new Date('2026-10-28T12:00:00Z')
+  const summary = getOrderWarningSummary([
+    aged({ orderNumber: '#30', date: '09/28/2026', status: 'In transit' }),
+    aged({ orderNumber: '#31', date: '09/27/2026', status: 'In transit' }),
+    aged({ orderNumber: '#failed30', date: '09/28/2026', status: 'Failed delivery' }),
+    aged({ orderNumber: '#failed31', date: '09/27/2026', status: 'Failed delivery' }),
+    aged({ orderNumber: '#7226', date: '10/16/2026', status: '' }),
+  ], today)
+  assert.deepEqual(summary.overdueOrders.map(r => r.orderNumber), ['#30', '#failed30', '#7226'])
+  assert.deepEqual(summary.failedOrders.map(r => r.orderNumber), ['#failed30'])
+  assert.equal(summary.warningOrders.some(r => r.orderNumber === '#31' || r.orderNumber === '#failed31'), false)
+  assert.equal(summary.activeOrders.some(r => r.orderNumber === '#31'), true)
+})

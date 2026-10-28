@@ -1,3 +1,4 @@
+import { countCalendarDays, maxRiskAgeDays } from '../src/services/trackingAnalytics.js'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -867,7 +868,8 @@ function buildTrackingDatabaseRow(row, sourceUpdatedAt) {
     status: row.status || null,
     status_source: row.statusSource || null,
     business_days_open: daysOpen,
-    is_overdue: !delivered && daysOpen > overdueDaysThreshold,
+    is_overdue: !delivered && daysOpen > overdueDaysThreshold
+      && countCalendarDays(ageStartDate) <= maxRiskAgeDays,
     observation: row.observation || null,
     raw_data: row,
     source_updated_at: sourceUpdatedAt,

@@ -1,4 +1,5 @@
 export const overdueDaysThreshold = 5
+export const maxRiskAgeDays = 30
 const trackingBusinessTimeZone = 'America/New_York'
 const trackingBusinessDateFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: trackingBusinessTimeZone,
@@ -25,6 +26,14 @@ function getTrackingBusinessToday(now = new Date()) {
   const values = Object.fromEntries(parts.map((part) => [part.type, Number(part.value)]))
 
   return new Date(Date.UTC(values.year, values.month - 1, values.day, 12))
+}
+
+// Compare date-only UTC values so DST and time of day cannot shift the cutoff.
+export function countCalendarDays(startDate, endDate = getTrackingBusinessToday()) {
+  if (!startDate) return null
+  const start = Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate())
+  const end = Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate())
+  return Math.floor((end - start) / 86400000)
 }
 
 export function countOpenDays(startDate, endDate = getTrackingBusinessToday()) {
@@ -63,7 +72,7 @@ export function getTrackingOrderKey(row) {
   return String(row.orderNumber || row.rowId || '').trim()
 }
 
-export function getOrderWarningSummary(rows) {
+export function getOrderWarningSummary(rows, today = getTrackingBusinessToday()) {
   const ordersByKey = new Map()
 
   rows.forEach((row) => {
@@ -80,9 +89,10 @@ export function getOrderWarningSummary(rows) {
       status: '',
     }
 
-    nextOrder.failed = nextOrder.failed || row.normalizedStatus === 'failed'
+    const withinRiskWindow = countCalendarDays(parseTrackingDate(row.date), today) <= maxRiskAgeDays
+    nextOrder.failed = nextOrder.failed || (withinRiskWindow && row.normalizedStatus === 'failed')
     nextOrder.overdue = nextOrder.overdue
-      || (row.normalizedStatus !== 'delivered' && row.businessDaysOpen > overdueDaysThreshold)
+      || (withinRiskWindow && row.normalizedStatus !== 'delivered' && row.businessDaysOpen > overdueDaysThreshold)
     nextOrder.active = nextOrder.active
       || (row.normalizedStatus !== 'delivered' && row.normalizedStatus !== 'failed')
 
