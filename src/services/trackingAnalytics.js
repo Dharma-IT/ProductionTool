@@ -92,7 +92,7 @@ export function getOrderWarningSummary(rows, today = getTrackingBusinessToday())
     const withinRiskWindow = countCalendarDays(parseTrackingDate(row.date), today) <= maxRiskAgeDays
     nextOrder.failed = nextOrder.failed || (withinRiskWindow && row.normalizedStatus === 'failed')
     nextOrder.overdue = nextOrder.overdue
-      || (withinRiskWindow && row.normalizedStatus !== 'delivered' && row.businessDaysOpen > overdueDaysThreshold)
+      || (withinRiskWindow && row.normalizedStatus !== 'unknown' && row.normalizedStatus !== 'delivered' && row.businessDaysOpen > overdueDaysThreshold)
     nextOrder.active = nextOrder.active
       || (row.normalizedStatus !== 'delivered' && row.normalizedStatus !== 'failed')
 

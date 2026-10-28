@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadAllShopifyTracking } from '../services/shopifyTracking'
-import { countOpenDays, getNormalizedTrackingStatus, getOrderWarningSummary, getTrackingOrderKey, maxRiskAgeDays, overdueDaysThreshold, parseTrackingDate } from '../services/trackingAnalytics'
+import { countOpenDays, getNormalizedTrackingStatus, getOrderWarningSummary, getTrackingOrderKey, overdueDaysThreshold, parseTrackingDate } from '../services/trackingAnalytics'
 
 const trackingHeaders = [
   'Order Number',
@@ -281,7 +281,7 @@ function Tracking() {
                 {' '}
                 {overdueDaysThreshold}
                 {' '}
-                business days; ordered within {maxRiskAgeDays} calendar days
+                business days
               </small>
             </div>
             <div className="tracking-risk-graphic" aria-hidden="true">
@@ -320,7 +320,7 @@ function Tracking() {
 
             <article className="tracking-warning-card">
               <div className="tracking-card-heading">
-                <h2>Warnings (last {maxRiskAgeDays} calendar days)</h2>
+                <h2>Warnings</h2>
                 <span>{analytics.warningOrders.length} orders</span>
               </div>
               <div className="tracking-warning-summary">
@@ -339,7 +339,7 @@ function Tracking() {
               </div>
               <div className="tracking-warning-list">
                 {analytics.warningOrders.length === 0 && (
-                  <div className="tracking-warning-empty">{complete ? 'No overdue or failed deliveries found within the last 30 calendar days.' : 'Checking remaining records for overdue or failed deliveries...'}</div>
+                  <div className="tracking-warning-empty">{complete ? 'No overdue or failed deliveries found.' : 'Checking remaining records for overdue or failed deliveries...'}</div>
                 )}
                 {analytics.warningOrders.map((row) => (
                   <div className="tracking-warning-item" key={`${getTrackingOrderKey(row)}-warning`}>

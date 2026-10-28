@@ -16,8 +16,8 @@ test('counts the current business day, excludes weekends and the order date', ()
 
 test('includes #7226 and previously excluded customers/products and deduplicates orders', () => {
   const summary = getOrderWarningSummary([
-    aged({ orderNumber: '#7226', name: 'Gladis Ordonez', date: '10/16/2026', status: '' }),
-    aged({ orderNumber: '#7226', name: 'Gladis Ordonez', date: '10/16/2026', status: '' }),
+    aged({ orderNumber: '#7226', name: 'Gladis Ordonez', date: '10/16/2026', status: 'In transit' }),
+    aged({ orderNumber: '#7226', name: 'Gladis Ordonez', date: '10/16/2026', status: 'In transit' }),
     aged({ orderNumber: '#7000', item: 'Detox Tea', date: '10/16/2026', status: 'In transit' }),
     aged({ orderNumber: '#7001', date: '10/16/2026', status: 'Delivered' }),
     aged({ orderNumber: '#7002', date: '10/28/2026', status: 'Failed delivery' }),
@@ -69,8 +69,20 @@ test('risk cutoff uses calendar days: includes day 30 and excludes day 31, inclu
     aged({ orderNumber: '#failed31', date: '09/27/2026', status: 'Failed delivery' }),
     aged({ orderNumber: '#7226', date: '10/16/2026', status: '' }),
   ], today)
-  assert.deepEqual(summary.overdueOrders.map(r => r.orderNumber), ['#30', '#failed30', '#7226'])
+  assert.deepEqual(summary.overdueOrders.map(r => r.orderNumber), ['#30', '#failed30'])
   assert.deepEqual(summary.failedOrders.map(r => r.orderNumber), ['#failed30'])
   assert.equal(summary.warningOrders.some(r => r.orderNumber === '#31' || r.orderNumber === '#failed31'), false)
   assert.equal(summary.activeOrders.some(r => r.orderNumber === '#31'), true)
+})
+
+test('no-status orders remain in open orders but are excluded from risks and warnings', () => {
+  const today = new Date('2026-10-28T12:00:00Z')
+  const rows = ['', null, 'No status', '   '].map((status, i) =>
+    aged({ orderNumber: `#blank${i}`, date: '10/16/2026', status }),
+  )
+  rows.push(aged({ orderNumber: '#tracked', date: '10/16/2026', status: 'In transit' }))
+  const summary = getOrderWarningSummary(rows, today)
+  assert.equal(summary.activeOrders.length, 5)
+  assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#tracked'])
+  assert.deepEqual(summary.warningOrders.map(row => row.orderNumber), ['#tracked'])
 })
