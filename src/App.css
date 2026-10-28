@@ -3811,3 +3811,10 @@
     padding: 8px;
   }
 }
+
+.tracking-search { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; max-width: 36rem; }
+.tracking-search input {
+  width: 100%; box-sizing: border-box; padding: 0.7rem;
+  border: 1px solid #ccd8d3; border-radius: 6px;
+  background: #fff; color: #233c30; font: inherit;
+}

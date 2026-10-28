@@ -490,7 +490,7 @@ function countTrackingOpenDays(startDate, endDate = getTrackingBusinessToday()) 
     startDate.getUTCFullYear(),
     startDate.getUTCMonth(),
     startDate.getUTCDate() + 1,
-    12,
+    0,
   ))
   const end = Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate())
   let businessDays = 0
@@ -895,6 +895,8 @@ function normalizeTrackingDatabaseRow(row) {
     isOverdue: Boolean(row.is_overdue),
     sourceUpdatedAt: row.source_updated_at ?? null,
     syncedAt: row.synced_at ?? null,
+    financialStatus: row.raw_data?.financialStatus ?? row.raw_data?.financial_status ?? '',
+    cancelledAt: row.raw_data?.cancelledAt ?? row.raw_data?.cancelled_at ?? '',
   }
 }
 
@@ -4182,6 +4184,32 @@ const server = createServer(async (request, response) => {
   }
 
   if (requestUrl.pathname === '/api/shopify/tracking' && request.method === 'GET') {
+    // Raw offsets keep filtered records from shifting subsequent pages.
+    if (requestUrl.searchParams.get('stored') === '1') {
+      try {
+        if (!hasSupabaseConfig()) throw new Error('Full tracking scan requires Supabase configuration')
+        const limit = readTrackingRowsLimit(requestUrl.searchParams.get('rowsLimit') ?? '1000')
+        const offset = readTrackingRowsOffset(requestUrl.searchParams.get('rowsOffset') ?? '0')
+        const params = new URLSearchParams({
+          select: '*', order: 'order_sort.desc,row_id.asc',
+          limit: String(limit), offset: String(offset),
+        })
+        const storedRows = await supabaseRequest(`/${supabaseTrackingTable}?${params}`)
+        if (!Array.isArray(storedRows)) throw new Error('Invalid tracking records response')
+        const rows = filterExcludedTrackingOrders(storedRows).map(normalizeTrackingDatabaseRow)
+        sendJson(request, response, 200, {
+          source: 'supabase', rows, rowsLimit: limit, rowsOffset: offset,
+          nextRowsOffset: offset + storedRows.length,
+          hasMoreRows: storedRows.length === limit,
+          updatedAt: new Date().toISOString(),
+          uspsTrackingEnabled: Boolean(process.env.USPS_CONSUMER_KEY && process.env.USPS_CONSUMER_SECRET)
+            && process.env.USPS_TRACKING_ENABLED !== '0',
+        }, { 'Cache-Control': 'no-store' })
+      } catch (error) {
+        sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
+      }
+      return
+    }
     const forceRefresh = requestUrl.searchParams.get('refresh') === '1'
     const limit = requestUrl.searchParams.get('limit') ?? '250'
     const rowsLimit = readTrackingRowsLimit(requestUrl.searchParams.get('rowsLimit') ?? '1000')

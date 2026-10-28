@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
-import { loadShopifyTracking } from '../services/shopifyTracking'
+import { loadAllShopifyTracking } from '../services/shopifyTracking'
+import { countOpenDays, getNormalizedTrackingStatus, getOrderWarningSummary, getTrackingOrderKey, overdueDaysThreshold, parseTrackingDate } from '../services/trackingAnalytics'
 
 const trackingHeaders = [
   'Order Number',
@@ -14,16 +15,8 @@ const trackingHeaders = [
   'Delivery Date',
   'Status',
 ]
-const overdueDaysThreshold = 5
+const trackingRowsPageSize = 100
 const trackingAutoRefreshMs = 5 * 60 * 1000
-const trackingRowsPageSize = 1000
-const trackingBusinessTimeZone = 'America/New_York'
-const trackingBusinessDateFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: trackingBusinessTimeZone,
-  year: 'numeric',
-  month: 'numeric',
-  day: 'numeric',
-})
 
 const trackingExportFields = [
   ['Order Number', 'orderNumber'],
@@ -89,285 +82,75 @@ function getTrackingSourceLabel(value) {
   return 'Sample'
 }
 
-function parseTrackingDate(value) {
-  if (!value) return null
-
-  const parts = String(value).trim().split('/').map(Number)
-  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return null
-
-  const [month, day, year] = parts
-  const date = new Date(Date.UTC(year, month - 1, day, 12))
-
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-function getTrackingBusinessToday(now = new Date()) {
-  const parts = trackingBusinessDateFormatter.formatToParts(now)
-  const values = Object.fromEntries(parts.map((part) => [part.type, Number(part.value)]))
-
-  return new Date(Date.UTC(values.year, values.month - 1, values.day, 12))
-}
-
-function countOpenDays(startDate, endDate = getTrackingBusinessToday()) {
-  if (!startDate) return 0
-
-  const cursor = new Date(Date.UTC(
-    startDate.getUTCFullYear(),
-    startDate.getUTCMonth(),
-    startDate.getUTCDate() + 1,
-    12,
-  ))
-  const end = Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate())
-  let businessDays = 0
-
-  while (cursor.getTime() <= end) {
-    const dayOfWeek = cursor.getUTCDay()
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) businessDays += 1
-    cursor.setUTCDate(cursor.getUTCDate() + 1)
-  }
-
-  return businessDays
-}
-
-function getNormalizedTrackingStatus(value) {
-  const status = String(value ?? '').toLowerCase()
-
-  if (status.includes('failed')) return 'failed'
-  if (status.includes('delivered')) return 'delivered'
-  if (status.includes('transit')) return 'transit'
-  if (status.includes('progress')) return 'progress'
-
-  return 'unknown'
-}
-
-function getTrackingOrderKey(row) {
-  return String(row.orderNumber || row.rowId || '').trim()
-}
-
-function normalizeWarningMatchText(value) {
-  return String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-function isUntrackableDetoxTeaRow(row) {
-  const normalizedItem = normalizeWarningMatchText(row.item)
-
-  return normalizedItem.includes('detox tea') || normalizedItem.includes('te detox')
-}
-
-const excludedWarningCustomers = new Set([
-  'gladis ordonez',
-  'mclaudia hernandez',
-  'yaylin gonzales',
-  'yahadra saenz',
-])
-
-function isExcludedWarningCustomer(row) {
-  return excludedWarningCustomers.has(normalizeWarningMatchText(row.name))
-}
-
-function getOrderWarningSummary(rows) {
-  const ordersByKey = new Map()
-
-  rows.forEach((row) => {
-    if (isUntrackableDetoxTeaRow(row) || isExcludedWarningCustomer(row)) return
-
-    const orderKey = getTrackingOrderKey(row)
-    if (!orderKey) return
-
-    const existingOrder = ordersByKey.get(orderKey)
-    const nextOrder = existingOrder ?? {
-      ...row,
-      failed: false,
-      overdue: false,
-      active: false,
-      businessDaysOpen: 0,
-      status: '',
-    }
-
-    nextOrder.failed = nextOrder.failed || row.normalizedStatus === 'failed'
-    nextOrder.overdue = nextOrder.overdue
-      || (row.normalizedStatus !== 'delivered' && row.businessDaysOpen > overdueDaysThreshold)
-    nextOrder.active = nextOrder.active
-      || (row.normalizedStatus !== 'delivered' && row.normalizedStatus !== 'failed')
-
-    const shouldUseRowDetails = row.normalizedStatus === 'failed'
-      || row.businessDaysOpen > nextOrder.businessDaysOpen
-
-    if (shouldUseRowDetails) {
-      nextOrder.status = row.status
-      nextOrder.statusSource = row.statusSource
-      nextOrder.businessDaysOpen = row.businessDaysOpen
-      nextOrder.name = row.name
-    }
-
-    ordersByKey.set(orderKey, nextOrder)
-  })
-
-  const orders = [...ordersByKey.values()]
-  const warningOrders = orders
-    .filter((order) => order.failed || order.overdue)
-    .map((order) => ({
-      ...order,
-      status: order.failed ? (order.status || 'Failed delivery') : order.status,
-    }))
-    .sort((left, right) =>
-      right.businessDaysOpen - left.businessDaysOpen
-      || left.orderNumber.localeCompare(right.orderNumber),
-    )
-
-  return {
-    activeOrders: orders.filter((order) => order.active),
-    failedOrders: orders.filter((order) => order.failed),
-    overdueOrders: orders.filter((order) => order.overdue),
-    warningOrders,
-  }
-}
-
 function Tracking() {
-  const emptyReport = {
-    source: 'shopify',
-    rows: [],
-    orderCount: 0,
-    rowsWithStatusCount: 0,
-    uspsTrackingError: '',
-    rowsLimit: trackingRowsPageSize,
-    rowsOffset: 0,
-    hasMoreRows: false,
-    updatedAt: null,
-  }
-  const [report, setReport] = useState({
-    ...emptyReport,
-  })
-  const [historyReport, setHistoryReport] = useState({
-    ...emptyReport,
-    rowsOffset: trackingRowsPageSize,
-  })
-  const [activeTrackingView, setActiveTrackingView] = useState('recent')
-  const [historyPageIndex, setHistoryPageIndex] = useState(0)
+  const [report, setReport] = useState({ source: 'supabase', rows: [] })
   const [status, setStatus] = useState('loading')
-  const [historyStatus, setHistoryStatus] = useState('idle')
   const [error, setError] = useState('')
-  const [historyError, setHistoryError] = useState('')
+  const [complete, setComplete] = useState(false)
   const [exportFormat, setExportFormat] = useState('xlsx')
-  const historyRowsOffset = (historyPageIndex + 1) * trackingRowsPageSize
-  const activeReport = activeTrackingView === 'history' ? historyReport : report
-  const activeStatus = activeTrackingView === 'history' ? historyStatus : status
-  const activeError = activeTrackingView === 'history' ? historyError : error
+  const [search, setSearch] = useState('')
+  const [pageIndex, setPageIndex] = useState(0)
+  const [refreshRequest, setRefreshRequest] = useState({ live: false, version: 0 })
+  const activeReport = report
+  const activeStatus = status
+  const activeError = error
 
   useEffect(() => {
-    let isMounted = true
-    let refreshInterval
-
-    const loadTracking = (options = {}) => {
-      if (options.showLoading) {
-        setStatus('loading')
-      }
-
-      return loadShopifyTracking({
-        ...options,
-        rowsLimit: trackingRowsPageSize,
-        rowsOffset: 0,
-      })
-        .then((data) => {
-          if (!isMounted) return
+    const controller = new AbortController()
+    let running = false
+    async function load(live = false) {
+      if (running) return
+      running = true
+      setStatus('loading')
+      setComplete(false)
+      setError('')
+      try {
+        const data = await loadAllShopifyTracking({
+          forceRefresh: live,
+          signal: controller.signal,
+          onProgress: (partial) => {
+            if (!controller.signal.aborted) setReport(partial)
+          },
+        })
+        if (!controller.signal.aborted) {
           setReport(data)
+          setComplete(true)
           setStatus('ready')
-          setError('')
-        })
-        .catch((loadError) => {
-          if (!isMounted) return
+        }
+      } catch (loadError) {
+        if (!controller.signal.aborted) {
           setError(loadError.message)
-          setStatus((currentStatus) => (currentStatus === 'ready' ? currentStatus : 'error'))
-        })
+          setStatus('error')
+        }
+      } finally {
+        running = false
+      }
     }
-
-    loadTracking({ showLoading: true })
-    refreshInterval = window.setInterval(() => {
-      loadTracking({ skipSessionCache: true })
-    }, trackingAutoRefreshMs)
-
+    load(refreshRequest.live)
+    const interval = window.setInterval(() => load(), trackingAutoRefreshMs)
     return () => {
-      isMounted = false
-      window.clearInterval(refreshInterval)
+      controller.abort()
+      window.clearInterval(interval)
     }
-  }, [])
-
-  useEffect(() => {
-    if (activeTrackingView !== 'history') return
-    if (historyReport.rows.length > 0 && historyReport.rowsOffset === historyRowsOffset) return
-
-    loadHistoryPage(historyPageIndex)
-  }, [activeTrackingView, historyPageIndex, historyReport.rows.length, historyReport.rowsOffset, historyRowsOffset])
-
-  function loadHistoryPage(pageIndex, options = {}) {
-    const rowsOffset = (pageIndex + 1) * trackingRowsPageSize
-
-    setHistoryStatus('loading')
-    setHistoryError('')
-
-    return loadShopifyTracking({
-      ...options,
-      rowsLimit: trackingRowsPageSize,
-      rowsOffset,
-    })
-      .then((data) => {
-        setHistoryReport(data)
-        setHistoryStatus('ready')
-      })
-      .catch((loadError) => {
-        setHistoryError(loadError.message)
-        setHistoryStatus('error')
-      })
-  }
+  }, [refreshRequest])
 
   function refreshTracking() {
-    if (activeTrackingView === 'history') {
-      loadHistoryPage(historyPageIndex, { forceRefresh: true })
-      return
-    }
-
-    setStatus('loading')
-    setError('')
-    loadShopifyTracking({
-      forceRefresh: true,
-      rowsLimit: trackingRowsPageSize,
-      rowsOffset: 0,
-    })
-      .then((data) => {
-        setReport(data)
-        setStatus('ready')
-      })
-      .catch((loadError) => {
-        setError(loadError.message)
-        setStatus('error')
-      })
+    setRefreshRequest((current) => ({ live: true, version: current.version + 1 }))
   }
 
   function refreshTrackingFromCache() {
-    if (activeTrackingView === 'history') {
-      loadHistoryPage(historyPageIndex)
-      return
-    }
-
-    loadShopifyTracking({
-      rowsLimit: trackingRowsPageSize,
-      rowsOffset: 0,
-    })
-      .then((data) => {
-        setReport(data)
-        setStatus('ready')
-        setError('')
-      })
-      .catch((loadError) => {
-        setError(loadError.message)
-        setStatus('error')
-      })
+    setRefreshRequest((current) => ({ live: false, version: current.version + 1 }))
   }
+
+  const matchingRows = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return report.rows.filter((row) => !query || trackingExportFields.some(([, field]) =>
+      String(row[field] ?? '').toLowerCase().includes(query),
+    ))
+  }, [report.rows, search])
+  const pageCount = Math.max(1, Math.ceil(matchingRows.length / trackingRowsPageSize))
+  const currentPage = Math.min(pageIndex, pageCount - 1)
+  const visibleRows = matchingRows.slice(currentPage * trackingRowsPageSize, (currentPage + 1) * trackingRowsPageSize)
 
   const analytics = useMemo(() => {
     const statusGroups = {
@@ -471,7 +254,7 @@ function Tracking() {
           </select>
           <button
             className="filter-button"
-            disabled={activeStatus === 'loading' || analytics.overdueOrders.length === 0}
+            disabled={!complete || analytics.overdueOrders.length === 0}
             type="button"
             onClick={exportDeliveryRisks}
           >
@@ -480,32 +263,19 @@ function Tracking() {
         </div>
       </div>
 
-      <nav className="home-view-tabs tracking-view-tabs" aria-label="Tracking views">
-        <button
-          type="button"
-          className={activeTrackingView === 'recent' ? 'active' : ''}
-          onClick={() => setActiveTrackingView('recent')}
-        >
-          <span>Recent</span>
-          <strong>{report.rows.length}</strong>
-        </button>
-        <button
-          type="button"
-          className={activeTrackingView === 'history' ? 'active' : ''}
-          onClick={() => setActiveTrackingView('history')}
-        >
-          <span>History</span>
-          <strong>{historyReport.rows.length}</strong>
-        </button>
-      </nav>
+      <div className="tracking-history-controls" role="status">
+        {complete
+          ? `All ${report.rows.length} records checked. Risk totals cover every page.`
+          : `${status === 'error' ? 'Scan incomplete' : 'Checking all records'} - ${report.rows.length} records available. Risk totals and search results are partial until the scan completes.`}
+      </div>
 
-      {activeStatus === 'error' && <div className="report-alert">{activeError}</div>}
-      {activeStatus !== 'loading' && (
+      {activeError && <div className="report-alert">{activeError}</div>}
+      {report.rows.length > 0 && (
         <section className="tracking-analytics" aria-label="Tracking analytics">
           <div className="tracking-analytics-hero">
             <div>
               <span>Delivery Risk</span>
-              <strong>{analytics.overdueOrders.length}</strong>
+              <strong>{complete ? analytics.overdueOrders.length : `${analytics.overdueOrders.length} so far`}</strong>
               <small>
                 Open orders over
                 {' '}
@@ -563,13 +333,13 @@ function Tracking() {
                   Open orders
                 </span>
                 <span>
-                  <strong>{analytics.overdueOrders.length}</strong>
+                  <strong>{complete ? analytics.overdueOrders.length : `${analytics.overdueOrders.length} so far`}</strong>
                   Overdue
                 </span>
               </div>
               <div className="tracking-warning-list">
                 {analytics.warningOrders.length === 0 && (
-                  <div className="tracking-warning-empty">No overdue or failed deliveries found.</div>
+                  <div className="tracking-warning-empty">{complete ? 'No overdue or failed deliveries found across all records.' : 'Checking remaining records for overdue or failed deliveries...'}</div>
                 )}
                 {analytics.warningOrders.map((row) => (
                   <div className="tracking-warning-item" key={`${getTrackingOrderKey(row)}-warning`}>
@@ -596,38 +366,21 @@ function Tracking() {
       )}
 
       <div className="table-panel tracking-panel">
-        {activeTrackingView === 'history' && (
-          <div className="tracking-history-controls">
-            <div>
-              <strong>
-                Rows
-                {' '}
-                {historyRowsOffset + 1}
-                -
-                {historyRowsOffset + historyReport.rows.length}
-              </strong>
-              <span>Showing older tracking records in batches of {trackingRowsPageSize}</span>
-            </div>
-            <div>
-              <button
-                className="filter-button"
-                disabled={historyStatus === 'loading' || historyPageIndex === 0}
-                type="button"
-                onClick={() => setHistoryPageIndex((currentPage) => Math.max(0, currentPage - 1))}
-              >
-                Newer
-              </button>
-              <button
-                className="filter-button"
-                disabled={historyStatus === 'loading' || !historyReport.hasMoreRows}
-                type="button"
-                onClick={() => setHistoryPageIndex((currentPage) => currentPage + 1)}
-              >
-                Older
-              </button>
-            </div>
+        <div className="tracking-history-controls">
+          <label className="tracking-search" htmlFor="tracking-search">
+            Search all orders
+            <input id="tracking-search" type="search" value={search}
+              placeholder="Order number, customer, tracking, item, status..."
+              onChange={(event) => { setSearch(event.target.value); setPageIndex(0) }} />
+          </label>
+          <div>
+            <span>{matchingRows.length} matching records - Page {currentPage + 1} of {pageCount}</span>
+            <button className="filter-button" disabled={currentPage === 0} type="button"
+              onClick={() => setPageIndex(currentPage - 1)}>Previous</button>
+            <button className="filter-button" disabled={currentPage + 1 >= pageCount} type="button"
+              onClick={() => setPageIndex(currentPage + 1)}>Next</button>
           </div>
-        )}
+        </div>
         <div className="table-shell">
           <table className="client-table tracking-table">
             <thead>
@@ -645,17 +398,17 @@ function Tracking() {
               </tr>
             </thead>
             <tbody>
-              {activeStatus === 'loading' && (
+              {activeStatus === 'loading' && report.rows.length === 0 && (
                 <tr className="empty-row">
                   <td colSpan={trackingHeaders.length}>Loading Shopify orders...</td>
                 </tr>
               )}
-              {activeStatus !== 'loading' && activeReport.rows.length === 0 && (
+              {visibleRows.length === 0 && activeStatus !== 'loading' && (
                 <tr className="empty-row">
-                  <td colSpan={trackingHeaders.length}>No Shopify orders found</td>
+                  <td colSpan={trackingHeaders.length}>{complete ? 'No matching orders found' : 'No matching orders loaded yet; scan incomplete'}</td>
                 </tr>
               )}
-              {activeStatus !== 'loading' && activeReport.rows.map((row) => (
+              {visibleRows.map((row) => (
                 <tr key={row.rowId}>
                   <td className="tracking-order-cell">{displayCell(row.orderNumber)}</td>
                   <td>{displayCell(row.suplifulOrder)}</td>

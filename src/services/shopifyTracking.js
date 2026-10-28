@@ -1,4 +1,6 @@
-const sessionCacheKey = 'shopify-tracking-report:v5'
+import { collectTrackingPages } from './trackingPagination'
+
+const sessionCacheKey = 'shopify-tracking-report:v6'
 const defaultRowsLimit = 1000
 const sessionCacheTtlMs = 5 * 60 * 1000
 
@@ -81,7 +83,7 @@ export async function loadShopifyTracking(options = {}) {
     }
   }
 
-  const cachedReport = options.forceRefresh || options.skipSessionCache
+  const cachedReport = options.forceRefresh || options.skipSessionCache || options.stored
     ? null
     : readCachedTracking(options)
   if (cachedReport) {
@@ -92,6 +94,7 @@ export async function loadShopifyTracking(options = {}) {
   }
 
   const requestUrl = new URL(endpoint, window.location.origin)
+  if (options.stored) requestUrl.searchParams.set('stored', '1')
   if (options.forceRefresh) {
     requestUrl.searchParams.set('refresh', '1')
   }
@@ -99,7 +102,8 @@ export async function loadShopifyTracking(options = {}) {
   requestUrl.searchParams.set('rowsOffset', String(options.rowsOffset ?? 0))
 
   const response = await fetch(requestUrl, {
-    cache: options.forceRefresh ? 'no-store' : 'default',
+    cache: options.forceRefresh || options.stored ? 'no-store' : 'default',
+    signal: options.signal,
   })
 
   if (!response.ok) {
@@ -136,11 +140,24 @@ export async function loadShopifyTracking(options = {}) {
     rowsLimit: payload.rowsLimit ?? options.rowsLimit ?? defaultRowsLimit,
     rowsOffset: payload.rowsOffset ?? options.rowsOffset ?? 0,
     hasMoreRows: Boolean(payload.hasMoreRows),
+    nextRowsOffset: payload.nextRowsOffset ?? null,
+    databaseError: payload.databaseError ?? null,
     updatedAt: payload.updatedAt ?? new Date().toISOString(),
     cacheSource: payload.cacheSource ?? 'network',
   }
 
-  writeCachedTracking(report, options)
+  if (!options.stored) writeCachedTracking(report, options)
 
   return report
+}
+
+export async function loadAllShopifyTracking(options = {}) {
+  if (!import.meta.env.VITE_SHOPIFY_TRACKING_URL) throw new Error('Tracking endpoint is not configured')
+  if (options.forceRefresh) {
+    const refreshed = await loadShopifyTracking({ forceRefresh: true, signal: options.signal })
+    if (refreshed.databaseError) throw new Error(`Live sync failed: ${refreshed.databaseError}`)
+  }
+  return collectTrackingPages((rowsOffset) => loadShopifyTracking({
+    stored: true, skipSessionCache: true, rowsLimit: 1000, rowsOffset, signal: options.signal,
+  }), options)
 }
