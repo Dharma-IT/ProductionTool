@@ -169,6 +169,30 @@ test('reports missing required headers', () => {
   ])
 })
 
+for (const [product, purchase] of [
+  ['Zepbound', 'Zepbound 5mg'],
+  ['Semaglutide', 'Personalized Semaglutide+ 1mg'],
+  ['Tirzepatide', 'Personalized Tirzepatide+ 52mg'],
+  ['NAD+', 'NAD+ 200mg'],
+]) {
+  test(`verifies Subscription ${product} against its medical form`, () => {
+    const input = order({ treatment: `1x Subscription ${product}`, purchaseDate: '2026-10-26' })
+    assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([])).rows[0].medicalForm, 'Pending')
+    assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([csvRow({ purchase })])).rows[0].medicalForm, 'Yes')
+    assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([
+      csvRow({ purchase: 'Sermorelin 60-Day Supply' }),
+    ])).rows[0].medicalForm, 'Mismatch')
+  })
+}
+
+test('excludes NAD+ capsules from medical checks and from qualifying subscription forms', () => {
+  for (const product of ['NAD+ Capsules', 'Subscription NAD+ Capsules']) {
+    const lookup = buildOrderCsvLookup([csvRow({ purchase: product })])
+    assert.equal(enrichHubSpotOrders([order({ treatment: `1x ${product}` })], lookup).rows[0].medicalForm, '')
+    assert.equal(enrichHubSpotOrders([order({ treatment: '1x Subscription NAD+' })], lookup).rows[0].medicalForm, 'Pending')
+  }
+})
+
 test('expands distinct products and keeps quantities on the matching name', () => {
   const expanded = expandHubSpotOrderItems([order({
     clientName: 'Norma Thorne (7)',

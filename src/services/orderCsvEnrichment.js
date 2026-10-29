@@ -82,6 +82,8 @@ function hasCompleteAddress(address) {
 function medicalProducts(value) {
   const normalized = cleanCsvValue(value).toLowerCase()
   const products = new Set()
+  if (/\bzepbound\b/.test(normalized)) products.add('zepbound')
+  if (/\bnad\b/.test(normalized) && !/\bcapsules?\b/.test(normalized)) products.add('nad+')
   if (normalized.includes('tirzepatide')) products.add('tirzepatide')
   if (normalized.includes('semaglutide')) products.add('semaglutide')
   if (normalized.includes('sermorelin') || normalized.includes('sermorlin')) products.add('sermorelin')
@@ -107,6 +109,8 @@ function medicalProductMatches(treatment, purchase) {
 
   return [...treatmentProducts].some((product) => {
     if (!purchaseProducts.has(product)) return false
+    // Subscription line items often omit the dose that is present on the form.
+    if (/\bsubscription\b/i.test(treatment) && treatmentDosage === null) return true
     if (treatmentDosage === null && purchaseDosage === null) return true
     if (treatmentDosage === null || purchaseDosage === null) return false
 

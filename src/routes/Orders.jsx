@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
 import { loadOrdersHistory, saveOrdersHistory } from '../services/ordersHistory'
+import { formatOrderPurchaseDate } from '../services/orderDates'
 import {
   buildOrderCsvLookup,
   buildStriveCsvLookup,
@@ -58,10 +59,7 @@ function displayCell(row, key) {
   if (key === 'language' && /^es(?:[-_]|$)/i.test(String(value).trim())) return 'Spanish'
   if (key !== 'purchaseDate') return value
 
-  const date = new Date(value)
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).format(date)
+  return formatOrderPurchaseDate(value)
 }
 
 function Orders() {
