@@ -371,19 +371,23 @@ function Orders() {
     }
 
     if (header.key === 'medicalForm' || header.key === 'doctorPrescribed') {
+      const savedStatus = String(editableValue ?? '').trim()
+      const statuses = ['Yes', 'Pending', 'Mismatch', 'No']
+      const selectedStatus = statuses.find((value) => value.toLowerCase() === savedStatus.toLowerCase()) ?? savedStatus
       return (
         <select
           aria-label={`${header.label} for ${row.clientName}`}
-          className={`orders-status-select ${String(editableValue).toLowerCase()}`}
-          value={editableValue}
+          className={`orders-status-select ${selectedStatus.toLowerCase()}`}
+          value={selectedStatus}
           onChange={(event) => updateCell(row.id, header.key, event.target.value)}
           onBlur={() => activeView === 'history' && saveHistoryRow(row)}
         >
           <option value="">{header.key === 'medicalForm' ? '' : 'Select'}</option>
           <option value="Yes">Yes</option>
           <option value="Pending">Pending</option>
-          {header.key === 'medicalForm' && <option value="Mismatch">Mismatch</option>}
+          {(header.key === 'medicalForm' || selectedStatus === 'Mismatch') && <option value="Mismatch">Mismatch</option>}
           <option value="No">No</option>
+          {selectedStatus && !statuses.includes(selectedStatus) && <option value={selectedStatus}>{selectedStatus}</option>}
         </select>
       )
     }
