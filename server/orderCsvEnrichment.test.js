@@ -65,6 +65,36 @@ test('keeps the HubSpot language when the uploaded CSV has none', () => {
   assert.equal(result.rows[0].language, 'English')
 })
 
+test('uses the Portal name after matching by phone and preserves item identity and quantity', () => {
+  const original = order({ number: '15134974250', clientName: 'Aurora Cux (2)' })
+  const lookup = buildOrderCsvLookup([csvRow({
+    phone: '+1 (513) 497-4250', firstName: ' Aurora ', lastName: '  Aguilar ',
+  })])
+  const result = enrichHubSpotOrders([original], lookup)
+  assert.equal(result.matchedCount, 1)
+  assert.equal(result.rows[0].clientName, 'Aurora Aguilar (2)')
+  assert.equal(result.rows[0].id, original.id)
+  assert.equal(result.rows[0].number, original.number)
+  assert.equal(result.rows[0].treatment, original.treatment)
+  assert.equal(result.rows[0].medicalForm, 'Yes')
+  assert.equal(original.clientName, 'Aurora Cux (2)')
+})
+
+test('keeps the original patient name when unmatched or the Portal name is empty', () => {
+  const original = order()
+  for (const lookup of [
+    buildOrderCsvLookup([]),
+    buildOrderCsvLookup([csvRow({ firstName: '', lastName: 'null' })]),
+  ]) {
+    assert.equal(enrichHubSpotOrders([original], lookup).rows[0].clientName, original.clientName)
+  }
+})
+
+test('uses the uploaded spelling after a name fallback match', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ phone: '', firstName: 'JEUZ', lastName: 'VINCI' })])
+  assert.equal(enrichHubSpotOrders([order({ number: '' })], lookup).rows[0].clientName, 'JEUZ VINCI (2)')
+})
+
 test('maps an uploaded es language code to Spanish', () => {
   const lookup = buildOrderCsvLookup([csvRow({ preferredLanguages: 'es' })])
   const result = enrichHubSpotOrders([order({ language: 'English' })], lookup)

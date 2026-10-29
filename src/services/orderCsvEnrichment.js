@@ -278,6 +278,11 @@ export function enrichHubSpotOrders(orders, lookup) {
 
     const addressMatch = matches.find((row) => hasCompleteAddress(readAddress(row))) ?? matches[0]
     const languageMatch = matches.find((row) => cleanCsvValue(row.preferredLanguages))
+    const portalName = matches
+      .map((row) => [cleanCsvValue(row.firstName), cleanCsvValue(row.lastName)]
+        .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim())
+      .find(Boolean)
+    const quantitySuffix = cleanCsvValue(order.clientName).match(/\s*\(\d+\)$/)?.[0] ?? ''
     const address = addressMatch ? readAddress(addressMatch) : {
       address: '', city: '', state: '', zipCode: '',
     }
@@ -292,6 +297,7 @@ export function enrichHubSpotOrders(orders, lookup) {
 
     return {
       ...order,
+      clientName: portalName ? `${portalName}${quantitySuffix}` : order.clientName,
       language: displayLanguage(languageMatch?.preferredLanguages || order.language),
       address: address.address,
       city: address.city,
