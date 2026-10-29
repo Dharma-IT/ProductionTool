@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { productPriceCatalog } from './productPriceCatalog.js'
+import { buildOrdersSnapshot, readOrdersSnapshot } from './ordersSnapshots.js'
 import {
   buildAircallDatabaseRow,
   fetchAircallCalls,
@@ -1392,7 +1393,8 @@ function normalizeOrdersHistoryDatabaseRow(row) {
 }
 
 async function upsertOrdersHistoryRowsToSupabase(rows, reportDate, sourceFileName) {
-  if (!hasSupabaseConfig() || rows.length === 0) return []
+  if (!hasSupabaseConfig()) throw new Error('Orders database storage is not configured.')
+  if (rows.length === 0) return []
   const databaseRows = rows.map((row) => buildOrdersHistoryDatabaseRow(row, reportDate, sourceFileName))
 
   for (let index = 0; index < databaseRows.length; index += 500) {
@@ -1413,8 +1415,15 @@ async function loadOrdersHistoryRowsFromSupabase(reportDate) {
     order: 'report_date.desc,imported_at.desc,row_id.asc',
   })
   if (reportDate) params.set('report_date', `eq.${reportDate}`)
-  const rows = await supabaseRequest(`/${supabaseOrdersHistoryTable}?${params.toString()}`)
-  return Array.isArray(rows) ? rows.map(normalizeOrdersHistoryDatabaseRow) : []
+  const records = []
+  for (let offset = 0; ; offset += 500) {
+    params.set('limit', '500')
+    params.set('offset', String(offset))
+    const rows = await supabaseRequest(`/${supabaseOrdersHistoryTable}?${params.toString()}`)
+    if (!Array.isArray(rows)) throw new Error('Invalid orders history response.')
+    records.push(...rows.map(normalizeOrdersHistoryDatabaseRow))
+    if (rows.length < 500) return records
+  }
 }
 
 async function loadCallReportTeamsFromSupabase() {
@@ -4009,8 +4018,8 @@ const server = createServer(async (request, response) => {
 
   if (requestUrl.pathname === '/api/orders-history' && request.method === 'GET') {
     try {
-      const rows = await loadOrdersHistoryRowsFromSupabase(requestUrl.searchParams.get('date'))
-      sendJson(request, response, 200, { rows, updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
+      const records = await loadOrdersHistoryRowsFromSupabase(requestUrl.searchParams.get('date'))
+      sendJson(request, response, 200, { ...readOrdersSnapshot(records), updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
     } catch (error) {
       sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
     }
@@ -4020,15 +4029,29 @@ const server = createServer(async (request, response) => {
   if (requestUrl.pathname === '/api/orders-history' && request.method === 'POST') {
     try {
       const payload = await readJsonRequest(request)
-      const rows = Array.isArray(payload.rows) ? payload.rows.slice(0, 1000) : []
+      const rows = Array.isArray(payload.rows) ? payload.rows : []
       const reportDate = String(payload.reportDate ?? '').trim()
-      if (!rows.length || !/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+      if ((!rows.length && !payload.snapshot) || !/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
         sendJson(request, response, 400, { message: 'Expected rows and a valid reportDate.' }, { 'Cache-Control': 'no-store' })
         return
       }
-      await upsertOrdersHistoryRowsToSupabase(rows, reportDate, payload.sourceFileName)
-      const historyRows = await loadOrdersHistoryRowsFromSupabase(reportDate)
-      sendJson(request, response, 200, { rows: historyRows, savedCount: rows.length, updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
+      if (payload.snapshot) {
+        const snapshot = buildOrdersSnapshot(rows, reportDate, payload.sourceFileName || '',
+          Array.isArray(payload.warnings) ? payload.warnings : [])
+        await upsertOrdersHistoryRowsToSupabase([snapshot], reportDate, payload.sourceFileName)
+      } else {
+        const existing = readOrdersSnapshot(await loadOrdersHistoryRowsFromSupabase(reportDate))
+        if (existing.snapshot) {
+          const edits = new Map(rows.map((row) => [row.rowId || row.id, row]))
+          const snapshot = { ...existing.snapshot, savedAt: new Date().toISOString(),
+            rows: existing.rows.map((row) => ({ ...row, ...edits.get(row.rowId || row.id) })) }
+          await upsertOrdersHistoryRowsToSupabase([snapshot], reportDate, snapshot.sourceFileName)
+        } else {
+          await upsertOrdersHistoryRowsToSupabase(rows, reportDate, payload.sourceFileName)
+        }
+      }
+      const history = readOrdersSnapshot(await loadOrdersHistoryRowsFromSupabase(reportDate))
+      sendJson(request, response, 200, { ...history, savedCount: rows.length, updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
     } catch (error) {
       sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
     }

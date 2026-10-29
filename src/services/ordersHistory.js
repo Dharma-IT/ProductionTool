@@ -5,7 +5,7 @@ function getOrdersHistoryEndpoint() {
 async function readResponse(response) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(payload.message || `Orders history request failed (${response.status}).`)
-  return Array.isArray(payload.rows) ? payload.rows : []
+  return { ...payload, rows: Array.isArray(payload.rows) ? payload.rows : [] }
 }
 
 export async function loadOrdersHistory(date) {
@@ -14,10 +14,11 @@ export async function loadOrdersHistory(date) {
   return readResponse(await fetch(url, { cache: 'no-store' }))
 }
 
-export async function saveOrdersHistory(rows, reportDate, sourceFileName = '') {
-  return readResponse(await fetch(getOrdersHistoryEndpoint(), {
+export async function saveOrdersHistory(rows, reportDate, sourceFileName = '', options = {}) {
+  const result = await readResponse(await fetch(getOrdersHistoryEndpoint(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows, reportDate, sourceFileName }),
+    body: JSON.stringify({ rows, reportDate, sourceFileName, ...options }),
   }))
+  return result.rows
 }

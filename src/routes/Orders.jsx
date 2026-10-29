@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
 import { loadOrdersHistory, saveOrdersHistory } from '../services/ordersHistory'
@@ -9,6 +9,7 @@ import {
   enrichHubSpotOrders,
   enrichStriveOrderNumbers,
   expandHubSpotOrderItems,
+  findMedicalFormOrderWarnings,
   validateOrderCsvHeaders,
   validateStriveCsvHeaders,
 } from '../services/orderCsvEnrichment'
@@ -76,8 +77,19 @@ function Orders() {
   const [striveCsvError, setStriveCsvError] = useState('')
   const [cellEdits, setCellEdits] = useState({})
   const [activeView, setActiveView] = useState('current')
-  const [historyDate, setHistoryDate] = useState(todayIsoDate)
   const [historyRows, setHistoryRows] = useState([])
+  const [historyReport, setHistoryReport] = useState(null)
+  const [historyStatus, setHistoryStatus] = useState('idle')
+  const [autoSaveMessage, setAutoSaveMessage] = useState('')
+  const saveQueue = useRef(Promise.resolve())
+  const queueSnapshotSave = useCallback((snapshot) => {
+    const next = saveQueue.current.catch(() => {}).then(() => saveOrdersHistory(
+      snapshot.rows, snapshot.reportDate, snapshot.sourceFileName,
+      { snapshot: true, warnings: snapshot.warnings },
+    ))
+    saveQueue.current = next
+    return next
+  }, [])
   const [saveStatus, setSaveStatus] = useState('idle')
   const [saveMessage, setSaveMessage] = useState('')
 
@@ -92,7 +104,27 @@ function Orders() {
     [enrichment, striveCsvLookup],
   )
   const displayedRows = striveEnrichment.rows
+  const medicalWarnings = useMemo(
+    () => csvLookup ? findMedicalFormOrderWarnings(rows, csvLookup) : [],
+    [rows, csvLookup],
+  )
   const visibleRows = activeView === 'history' ? historyRows : displayedRows
+  const visibleHeaders = activeView === 'history'
+    ? [...orderHeaders, { key: 'reportDate', label: 'Report Date' }]
+    : orderHeaders
+  const visibleWarnings = activeView === 'history' ? historyReport?.warnings ?? [] : medicalWarnings
+  const snapshotPayload = useMemo(() => ({
+    rows: displayedRows, reportDate: request.date, sourceFileName: csvFileName, warnings: medicalWarnings,
+  }), [displayedRows, request.date, csvFileName, medicalWarnings])
+
+  useEffect(() => {
+    if (status !== 'ready' || !csvLookup) return undefined
+    let active = true
+    queueSnapshotSave(snapshotPayload)
+      .then(() => { if (active) setAutoSaveMessage(`Automatically saved for ${snapshotPayload.reportDate}.`) })
+      .catch((saveError) => { if (active) setAutoSaveMessage(`Automatic save failed: ${saveError.message}. Use Save final result to retry.`) })
+    return () => { active = false }
+  }, [status, csvLookup, snapshotPayload, queueSnapshotSave])
   const treatmentColorLookup = useMemo(() => {
     const lookup = new Map()
     visibleRows.forEach((row) => {
@@ -109,11 +141,20 @@ function Orders() {
   useEffect(() => {
     if (activeView !== 'history') return undefined
     let active = true
-    loadOrdersHistory(historyDate)
-      .then((loadedRows) => { if (active) setHistoryRows(loadedRows) })
-      .catch((loadError) => { if (active) setSaveMessage(loadError.message) })
+    saveQueue.current.catch(() => {}).then(() => loadOrdersHistory())
+      .then((report) => {
+        if (!active) return
+        setHistoryRows(report.rows)
+        setHistoryReport(report)
+        setHistoryStatus('ready')
+      })
+      .catch((loadError) => {
+        if (!active) return
+        setHistoryStatus('error')
+        setSaveMessage(loadError.message)
+      })
     return () => { active = false }
-  }, [activeView, historyDate])
+  }, [activeView])
 
   useEffect(() => {
     let active = true
@@ -141,6 +182,7 @@ function Orders() {
     setStatus('loading')
     setError('')
     setCsvLookup(null)
+    setAutoSaveMessage('')
     setCsvFileName('')
     setCsvError('')
     setStriveCsvLookup(null)
@@ -174,6 +216,7 @@ function Orders() {
 
       setCsvLookup(buildOrderCsvLookup(csvRows))
       setCsvFileName(file.name)
+      setAutoSaveMessage('Saving uploaded report automatically...')
     } catch (uploadError) {
       setCsvError(uploadError instanceof Error ? uploadError.message : 'Unable to read this CSV file.')
     } finally {
@@ -241,16 +284,16 @@ function Orders() {
     if (visibleRows.length === 0) return
 
     const exportRows = visibleRows.map((row) => Object.fromEntries(
-      orderHeaders.map(({ key, label }) => [label, readEditableValue(row, key)]),
+      visibleHeaders.map(({ key, label }) => [label, readEditableValue(row, key)]),
     ))
     const worksheet = XLSX.utils.json_to_sheet(exportRows, {
-      header: orderHeaders.map(({ label }) => label),
+      header: visibleHeaders.map(({ label }) => label),
     })
-    worksheet['!cols'] = orderHeaders.map(({ label }) => ({
+    worksheet['!cols'] = visibleHeaders.map(({ label }) => ({
       wch: Math.min(50, Math.max(label.length + 2, 14)),
     }))
 
-    const reportDate = activeView === 'history' ? historyDate : request.date
+    const reportDate = activeView === 'history' ? 'all-dates' : request.date
     const filename = `orders-${activeView}-${reportDate}`
 
     if (format === 'csv') {
@@ -277,8 +320,7 @@ function Orders() {
     setSaveStatus('saving')
     setSaveMessage('')
     try {
-      await saveOrdersHistory(displayedRows.map(materializeRow), request.date, csvFileName)
-      setHistoryDate(request.date)
+      await queueSnapshotSave({ ...snapshotPayload, rows: displayedRows.map(materializeRow) })
       setSaveMessage(`${displayedRows.length} rows saved to historical data.`)
     } catch (saveError) {
       setSaveMessage(saveError.message || 'Could not save orders history.')
@@ -292,8 +334,9 @@ function Orders() {
     setSaveStatus('saving')
     setSaveMessage('')
     try {
-      const savedRows = await saveOrdersHistory([materializeRow(row)], row.reportDate || historyDate, row.sourceFileName)
-      setHistoryRows(savedRows)
+      const savedRows = await saveOrdersHistory([materializeRow(row)], row.reportDate, row.sourceFileName)
+      setHistoryRows((current) => current.map((existing) =>
+        savedRows.find((saved) => saved.id === existing.id) ?? existing))
       setCellEdits((current) => {
         const next = { ...current }
         delete next[row.id]
@@ -309,6 +352,7 @@ function Orders() {
 
   function renderOrderCell(row, header) {
     const editableValue = readEditableValue(row, header.key)
+    if (header.key === 'reportDate') return <span>{row.reportDate}</span>
 
     if (header.key === 'treatment') {
       const treatmentName = String(editableValue).replace(/^\d+x\s+/i, '').trim()
@@ -368,7 +412,7 @@ function Orders() {
 
         <div className="orders-view-tabs" aria-label="Orders views">
           <button className={activeView === 'current' ? 'active' : ''} type="button" onClick={() => setActiveView('current')}>Current orders</button>
-          <button className={activeView === 'history' ? 'active' : ''} type="button" onClick={() => setActiveView('history')}>Historical data</button>
+          <button className={activeView === 'history' ? 'active' : ''} type="button" onClick={() => { if (activeView === 'history') return; setHistoryStatus('loading'); setHistoryRows([]); setHistoryReport(null); setActiveView('history') }}>Historical data</button>
         </div>
 
         {activeView === 'current' ? <form className="report-filters" aria-label="Orders date filter" onSubmit={submitDate}>
@@ -407,7 +451,7 @@ function Orders() {
             {striveCsvFileName} · {striveEnrichment.matchedCount}/{displayedRows.length} matched · {striveEnrichment.unmatchedCount} unmatched · {striveEnrichment.ambiguousCount} medication mismatch
           </span>
         )}
-        <button className="filter-button orders-save-button" disabled={!csvLookup || displayedRows.length === 0 || saveStatus === 'saving'} type="button" onClick={saveFinalResult}>
+        <button className="filter-button orders-save-button" disabled={status !== 'ready' || !csvLookup || saveStatus === 'saving'} type="button" onClick={saveFinalResult}>
           {saveStatus === 'saving' ? 'Saving…' : 'Save final result'}
         </button>
         <select
@@ -425,9 +469,8 @@ function Orders() {
           <option value="xlsx">Excel (.xlsx)</option>
         </select>
         </form> : (
-          <div className="report-filters" aria-label="Orders history date filter">
-            <span className="filter-label">Saved report date</span>
-            <input aria-label="Saved report date" className="date-filter-input" type="date" value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} />
+          <div className="report-filters" aria-label="Orders history">
+            <span className="filter-label">All saved orders · Newest report date first</span>
             <span className="timezone-pill">{historyRows.length} saved rows</span>
             {saveStatus === 'saving' && <span className="orders-upload-status">Saving change…</span>}
             <select
@@ -451,13 +494,49 @@ function Orders() {
         {csvError && <div className="report-alert" role="alert">{csvError}</div>}
         {striveCsvError && <div className="report-alert" role="alert">{striveCsvError}</div>}
         {saveMessage && <div className="orders-save-message" role="status">{saveMessage}</div>}
+        {activeView === 'current' && autoSaveMessage && <div className="orders-save-message" role="status">{autoSaveMessage}</div>}
 
-        <div className="table-panel orders-panel">
+        {((activeView === 'current' && status === 'ready' && csvLookup) || (activeView === 'history' && historyReport?.reportCount > 0)) && (
+          <section className="orders-reconciliation" aria-labelledby="orders-reconciliation-title">
+            <div className="orders-reconciliation-heading">
+              <div>
+                <h2 id="orders-reconciliation-title">Medical forms missing from fetched orders</h2>
+                <p>{activeView === 'history'
+                  ? 'Saved warnings across all report dates, newest first.'
+                  : `Comparing all medical records in ${csvFileName} with HubSpot orders fetched for ${request.date}.`}</p>
+              </div>
+              <strong role="status">{visibleWarnings.length} to review</strong>
+            </div>
+            <p>A warning means the patient or medication/dose was not found in its report date's fetched items. The transaction may be on another date. NAD+ capsules and supplements are excluded.</p>
+            {visibleWarnings.length > 0 ? (
+              <div className="orders-reconciliation-scroll">
+                <table className="client-table">
+                  <thead><tr>
+                    <th scope="col">Portal patient</th><th scope="col">Phone</th>
+                    <th scope="col">Medical form product</th><th scope="col">Form completed</th>
+                    <th scope="col">Warning</th>
+                    {activeView === 'history' && <th scope="col">Report Date</th>}
+                  </tr></thead>
+                  <tbody>{visibleWarnings.map((warning) => (
+                    <tr key={warning.id}>
+                      <td>{warning.clientName || 'Name unavailable'}</td><td>{warning.number || 'Phone unavailable'}</td>
+                      <td>{warning.treatment}</td><td>{warning.completionDate || 'Not provided'}</td>
+                      <td>{warning.reason}</td>
+                      {activeView === 'history' && <td>{warning.reportDate}</td>}
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : <p role="status">All medical-form records have matching fetched items.</p>}
+          </section>
+        )}
+
+        <div className={`table-panel orders-panel ${activeView === 'history' ? 'orders-history-panel' : ''}`}>
           <div className="table-shell">
           <table className="client-table orders-table">
             <thead>
               <tr>
-                {orderHeaders.map((header) => (
+                {visibleHeaders.map((header) => (
                   <th key={header.key} scope="col">{header.label}</th>
                 ))}
               </tr>
@@ -465,16 +544,16 @@ function Orders() {
             <tbody>
               {visibleRows.map((row) => (
                 <tr key={row.id}>
-                  {orderHeaders.map((header) => (
+                  {visibleHeaders.map((header) => (
                     <td key={header.key}>{renderOrderCell(row, header)}</td>
                   ))}
                 </tr>
               ))}
               {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={orderHeaders.length}>
+                  <td colSpan={visibleHeaders.length}>
                     {activeView === 'history'
-                      ? 'No historical data saved for this date'
+                      ? historyStatus === 'loading' ? 'Loading saved orders...' : historyStatus === 'error' ? 'Could not load saved orders' : 'No historical data saved'
                       : status === 'loading' ? 'Loading HubSpot orders…' : 'No paid orders found for this date'}
                   </td>
                 </tr>

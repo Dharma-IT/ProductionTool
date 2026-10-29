@@ -6,6 +6,7 @@ import {
   enrichHubSpotOrders,
   enrichStriveOrderNumbers,
   expandHubSpotOrderItems,
+  findMedicalFormOrderWarnings,
   validateOrderCsvHeaders,
   validateStriveCsvHeaders,
 } from '../src/services/orderCsvEnrichment.js'
@@ -37,6 +38,54 @@ function order(overrides = {}) {
     ...overrides,
   }
 }
+
+test('warns about Portal medical patients missing from the fetched date, using Portal names', () => {
+  const lookup = buildOrderCsvLookup([
+    csvRow({ firstName: 'Aurora', lastName: 'Aguilar', phone: '15134974250' }),
+    csvRow({ firstName: 'Missing', lastName: 'Patient', phone: '15550000000' }),
+  ])
+  const warnings = findMedicalFormOrderWarnings([
+    order({ number: '15134974250', clientName: 'Aurora Cux' }),
+  ], lookup)
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0].clientName, 'Missing Patient')
+  assert.equal(warnings[0].reason, 'Patient not found')
+  assert.equal(warnings[0].completionDate, '2026-09-30T12:00:00Z')
+})
+
+test('distinguishes missing items from missing patients and honors subscription and dosage rules', () => {
+  const lookup = buildOrderCsvLookup([
+    csvRow({ purchase: 'Personalized Tirzepatide+ 30mg' }),
+    csvRow({ purchase: 'Subscription Zepbound' }),
+    csvRow({ purchase: 'NAD+ 200mg' }),
+  ])
+  const warnings = findMedicalFormOrderWarnings([
+    order({ treatment: '1x Compounded Tirzepatide 24mg' }),
+    order({ treatment: '1x Subscription NAD+' }),
+  ], lookup)
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0].treatment, 'Subscription Zepbound')
+  assert.equal(warnings[0].reason, 'Medication or dose not found')
+  assert.equal(findMedicalFormOrderWarnings([order()], lookup).length, 3)
+})
+
+test('deduplicates repeated forms, keeps the latest completion, and excludes supplements', () => {
+  const lookup = buildOrderCsvLookup([
+    csvRow(), csvRow({ purchaseSurveyCompletionDate: '2026-10-29T12:00:00Z' }),
+    csvRow({ purchase: 'NAD+ Capsules' }), csvRow({ purchase: 'GLP-1 Support' }),
+  ])
+  const warnings = findMedicalFormOrderWarnings([], lookup)
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0].completionDate, '2026-10-29T12:00:00Z')
+})
+
+test('reconciles name fallback and empty identifiers without matching unidentified records', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ phone: '' })])
+  assert.deepEqual(findMedicalFormOrderWarnings([order({ number: '' })], lookup), [])
+  const unidentified = buildOrderCsvLookup([csvRow({ phone: '', firstName: '', lastName: '' })])
+  assert.equal(findMedicalFormOrderWarnings([order({ number: '', clientName: '' })], unidentified).length, 1)
+  assert.deepEqual(findMedicalFormOrderWarnings([], buildOrderCsvLookup([])), [])
+})
 
 test('matches country-code phone numbers and separates address fields', () => {
   const result = enrichHubSpotOrders([order()], buildOrderCsvLookup([csvRow()]))

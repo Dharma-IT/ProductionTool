@@ -247,19 +247,53 @@ export function expandHubSpotOrderItems(orders) {
 export function buildOrderCsvLookup(csvRows) {
   const byPhone = new Map()
   const byName = new Map()
+  const records = []
 
   csvRows.forEach((rawRow) => {
     const row = Object.fromEntries(
       Object.entries(rawRow).map(([key, value]) => [cleanCsvValue(key), cleanCsvValue(value)]),
     )
     const phone = normalizePhone(row.phone)
+    records.push(row)
     const name = normalizeName(`${row.firstName} ${row.lastName}`)
 
     if (phone) byPhone.set(phone, [...(byPhone.get(phone) ?? []), row])
     if (name) byName.set(name, [...(byName.get(name) ?? []), row])
   })
 
-  return { byPhone, byName, rowCount: csvRows.length }
+  return { byPhone, byName, records, rowCount: csvRows.length }
+}
+
+export function findMedicalFormOrderWarnings(orders, lookup) {
+  const patientMatches = new Set()
+  const itemMatches = new Set()
+  orders.forEach((order) => {
+    findMatches(order, lookup).forEach((record) => {
+      patientMatches.add(record)
+      if (medicalProductMatches(order.treatment, record.purchase)) itemMatches.add(record)
+    })
+  })
+
+  const warnings = new Map()
+  lookup.records.forEach((record, index) => {
+    if (!medicalProducts(record.purchase).size || itemMatches.has(record)) return
+    const clientName = [record.firstName, record.lastName].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+    const identity = normalizePhone(record.phone) || normalizeName(clientName) || `row-${index}`
+    const key = `${identity}|${record.purchase.toLowerCase().replace(/\s+/g, ' ')}`
+    const warning = {
+      id: key,
+      clientName,
+      number: record.phone,
+      treatment: record.purchase,
+      completionDate: record.purchaseSurveyCompletionDate || '',
+      reason: patientMatches.has(record) ? 'Medication or dose not found' : 'Patient not found',
+    }
+    const existing = warnings.get(key)
+    if (!existing || completionTime(record) > completionTime({ purchaseSurveyCompletionDate: existing.completionDate })) {
+      warnings.set(key, warning)
+    }
+  })
+  return [...warnings.values()]
 }
 
 function findMatches(order, lookup) {

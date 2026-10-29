@@ -446,10 +446,30 @@
   border-right: 0;
 }
 
+.orders-reconciliation {
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid #e1bd65;
+  border-radius: 16px;
+  background: #fffaf0;
+  color: #624611;
+}
+.orders-reconciliation-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.orders-reconciliation h2 { margin: 0; font-size: 1.1rem; }
+.orders-reconciliation p { font-size: 0.85rem; line-height: 1.5; }
+.orders-reconciliation-heading > strong { padding: 8px 14px; border-radius: 20px; background: #f9e6b4; white-space: nowrap; }
+.orders-reconciliation-scroll { max-height: 360px; overflow: auto; border-radius: 10px; }
+.orders-reconciliation .client-table { min-width: 850px; width: 100%; }
+.orders-reconciliation .client-table td { white-space: normal; overflow-wrap: anywhere; }
+
 .orders-panel {
   width: 100%;
   max-width: none;
 }
+.orders-history-panel .table-shell { max-height: 70vh; overflow: auto; }
+.orders-history-panel .orders-table th { position: sticky; top: 0; z-index: 3; background: #edf5ef; }
+.orders-history-panel .orders-table th:first-child,
+.orders-history-panel .orders-table th:nth-child(2) { z-index: 4; }
 
 .orders-view-tabs { display: flex; gap: 8px; margin: 18px 0 10px; }
 .orders-view-tabs button {
