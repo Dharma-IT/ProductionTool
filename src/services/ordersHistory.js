@@ -1,11 +1,21 @@
 function getOrdersHistoryEndpoint() {
-  return import.meta.env.VITE_ORDERS_HISTORY_URL ?? '/api/orders-history'
+  if (import.meta.env.VITE_ORDERS_HISTORY_URL) return import.meta.env.VITE_ORDERS_HISTORY_URL
+  const configuredEndpoint = import.meta.env.VITE_HUBSPOT_CALL_REPORT_URL
+  if (!configuredEndpoint) return '/api/orders-history'
+  const endpoint = new URL(configuredEndpoint, window.location.origin)
+  endpoint.pathname = '/api/orders-history'
+  endpoint.search = ''
+  endpoint.hash = ''
+  return endpoint.toString()
 }
 
 async function readResponse(response) {
-  const payload = await response.json().catch(() => ({}))
+  const payload = await response.json().catch(() => {
+    throw new Error('Orders history API did not return JSON. Check the configured API address.')
+  })
   if (!response.ok) throw new Error(payload.message || `Orders history request failed (${response.status}).`)
-  return { ...payload, rows: Array.isArray(payload.rows) ? payload.rows : [] }
+  if (!Array.isArray(payload.rows)) throw new Error('Orders history API returned an invalid response.')
+  return payload
 }
 
 export async function loadOrdersHistory(date) {
