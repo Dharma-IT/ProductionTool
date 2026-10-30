@@ -1,4 +1,4 @@
-import { countCalendarDays, getNormalizedTrackingStatus, maxRiskAgeDays } from '../src/services/trackingAnalytics.js'
+import { countCalendarDays, getNormalizedTrackingStatus, maxRiskAgeDays, reconcileDeliveredShipments } from '../src/services/trackingAnalytics.js'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -1822,6 +1822,7 @@ function applyUspsStatus(row, uspsTrackingLookup) {
     .find((trackingStatus) => trackingStatus?.status)
 
   if (!uspsStatus) return row
+  if (isDeliveredStatus(row.status) && !isDeliveredStatus(uspsStatus.status)) return row
   if (row.statusSource === 'sheet' && !isDeliveredStatus(uspsStatus.status)) return row
 
   return {
@@ -1918,7 +1919,9 @@ async function buildShopifyTrackingReport(options = {}) {
   } catch (error) {
     uspsTrackingError = error.message
   }
-  const rowsWithStatuses = rowsWithDetoxTeaShippingConfirmationStatus.map((row) => applyUspsStatus(row, uspsTrackingLookup))
+  const rowsWithStatuses = reconcileDeliveredShipments(
+    rowsWithDetoxTeaShippingConfirmationStatus.map((row) => applyUspsStatus(row, uspsTrackingLookup)),
+  )
   const rowsWithStatusCount = rowsWithStatuses.filter((row) => row.status).length
   const rowsWithUspsStatusCount = rowsWithStatuses.filter((row) => row.statusSource === 'usps').length
   const rowsWithShopifyStatusCount = rowsWithStatuses.filter((row) => row.statusSource === 'shopify').length

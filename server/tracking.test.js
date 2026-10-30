@@ -86,3 +86,28 @@ test('no-status orders remain in open orders but are excluded from risks and war
   assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#tracked'])
   assert.deepEqual(summary.warningOrders.map(row => row.orderNumber), ['#tracked'])
 })
+
+test('delivered packages clear stale duplicate warnings regardless of row order', () => {
+  const rows = [
+    aged({ orderNumber: '#7412', date: '10/22/2026', tracking: '9400 1234', status: 'In progress' }),
+    aged({ orderNumber: '#7412', date: '10/22/2026', tracking: '94001234', status: 'Delivered' }),
+  ]
+  // Use an older order date so the stale row would otherwise be overdue.
+  rows[0].businessDaysOpen = 8
+  for (const input of [rows, [...rows].reverse()]) {
+    const summary = getOrderWarningSummary(input, new Date('2026-10-30T12:00:00Z'))
+    assert.equal(summary.warningOrders.length, 0)
+    assert.equal(summary.activeOrders.length, 0)
+  }
+})
+
+test('partial deliveries and untracked items keep their own warnings', () => {
+  const summary = getOrderWarningSummary([
+    aged({ orderNumber: '#7201', date: '10/16/2026', tracking: 'delivered', status: 'Delivered' }),
+    aged({ orderNumber: '#7201', date: '10/16/2026', tracking: 'pending', status: 'In transit' }),
+    aged({ orderNumber: '#7189', date: '10/16/2026', status: 'Delivered' }),
+    aged({ orderNumber: '#7189', date: '10/16/2026', status: 'In progress' }),
+    aged({ orderNumber: '#7422', date: '10/16/2026', tracking: 'delivered', status: 'In transit' }),
+  ], new Date('2026-10-30T12:00:00Z'))
+  assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#7201', '#7189', '#7422'])
+})

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadAllShopifyTracking } from '../services/shopifyTracking'
-import { countOpenDays, getNormalizedTrackingStatus, getOrderWarningSummary, getTrackingOrderKey, overdueDaysThreshold, parseTrackingDate } from '../services/trackingAnalytics'
+import { countOpenDays, getNormalizedTrackingStatus, getOrderWarningSummary, getTrackingOrderKey, overdueDaysThreshold, parseTrackingDate, reconcileDeliveredShipments } from '../services/trackingAnalytics'
 
 const trackingHeaders = [
   'Order Number',
@@ -160,7 +160,7 @@ function Tracking() {
       progress: { label: 'In progress', count: 0, className: 'progress' },
       unknown: { label: 'No status', count: 0, className: 'unknown' },
     }
-    const rowsWithAge = activeReport.rows.map((row) => {
+    const rowsWithAge = reconcileDeliveredShipments(activeReport.rows).map((row) => {
       const normalizedStatus = getNormalizedTrackingStatus(row.status)
       const ageStartDate = parseTrackingDate(row.date)
       const daysOpen = normalizedStatus === 'delivered'

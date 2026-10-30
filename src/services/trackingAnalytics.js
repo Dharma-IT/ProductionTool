@@ -72,10 +72,36 @@ export function getTrackingOrderKey(row) {
   return String(row.orderNumber || row.rowId || '').trim()
 }
 
+// Delivery evidence applies to a package, not every package in the order.
+export function reconcileDeliveredShipments(rows) {
+  const trackingKeys = (row) => String(row.tracking ?? '').split(',')
+    .map((value) => value.replace(/\s/g, '').toUpperCase()).filter(Boolean)
+    .map((value) => `${getTrackingOrderKey(row)}|${value}`)
+  const delivered = new Map()
+  rows.forEach((row) => {
+    if (getNormalizedTrackingStatus(row.status) === 'delivered') {
+      trackingKeys(row).forEach((key) => delivered.set(key, row))
+    }
+  })
+  return rows.map((row) => {
+    const keys = trackingKeys(row)
+    if (!keys.length || !keys.every((key) => delivered.has(key))) return row
+    const evidence = delivered.get(keys[0])
+    return {
+      ...row,
+      status: 'Delivered',
+      normalizedStatus: 'delivered',
+      statusSource: evidence.statusSource,
+      deliveryDate: row.deliveryDate || evidence.deliveryDate,
+      businessDaysOpen: 0,
+    }
+  })
+}
+
 export function getOrderWarningSummary(rows, today = getTrackingBusinessToday()) {
   const ordersByKey = new Map()
 
-  rows.forEach((row) => {
+  reconcileDeliveredShipments(rows).forEach((row) => {
     const orderKey = getTrackingOrderKey(row)
     if (!orderKey) return
 
