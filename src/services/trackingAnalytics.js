@@ -72,6 +72,11 @@ export function getTrackingOrderKey(row) {
   return String(row.orderNumber || row.rowId || '').trim()
 }
 
+export function isDeliveryRiskExcluded(row) {
+  // Explicitly excluded at the user's request; this does not assert delivery.
+  return String(row.orderNumber ?? '').trim().replace(/^#/, '') === '7424'
+}
+
 // Delivery evidence applies to a package, not every package in the order.
 export function reconcileDeliveredShipments(rows) {
   const trackingKeys = (row) => String(row.tracking ?? '').split(',')
@@ -115,7 +120,8 @@ export function getOrderWarningSummary(rows, today = getTrackingBusinessToday())
       status: '',
     }
 
-    const withinRiskWindow = countCalendarDays(parseTrackingDate(row.date), today) <= maxRiskAgeDays
+    const withinRiskWindow = !isDeliveryRiskExcluded(row)
+      && countCalendarDays(parseTrackingDate(row.date), today) <= maxRiskAgeDays
     nextOrder.failed = nextOrder.failed || (withinRiskWindow && row.normalizedStatus === 'failed')
     nextOrder.overdue = nextOrder.overdue
       || (withinRiskWindow && row.normalizedStatus !== 'unknown' && row.normalizedStatus !== 'delivered' && row.businessDaysOpen > overdueDaysThreshold)
