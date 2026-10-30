@@ -1,5 +1,8 @@
 export const overdueDaysThreshold = 5
 export const maxRiskAgeDays = 30
+const deliveryRiskExcludedOrders = new Set([
+  '7424', '7201', '7189', '7422', '7421', '7412', '7296', '7285',
+])
 const trackingBusinessTimeZone = 'America/New_York'
 const trackingBusinessDateFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: trackingBusinessTimeZone,
@@ -74,7 +77,8 @@ export function getTrackingOrderKey(row) {
 
 export function isDeliveryRiskExcluded(row) {
   // Explicitly excluded at the user's request; this does not assert delivery.
-  return String(row.orderNumber ?? '').trim().replace(/^#/, '') === '7424'
+  return deliveryRiskExcludedOrders.has(String(row.orderNumber ?? '').trim().replace(/^#/, ''))
+    || String(row.tracking ?? '').split(',').some((value) => value.trim().length > 0)
 }
 
 // Delivery evidence applies to a package, not every package in the order.
