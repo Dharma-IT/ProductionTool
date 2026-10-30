@@ -78,7 +78,6 @@ export function getTrackingOrderKey(row) {
 export function isDeliveryRiskExcluded(row) {
   // Explicitly excluded at the user's request; this does not assert delivery.
   return deliveryRiskExcludedOrders.has(String(row.orderNumber ?? '').trim().replace(/^#/, ''))
-    || String(row.tracking ?? '').split(',').some((value) => value.trim().length > 0)
 }
 
 // Delivery evidence applies to a package, not every package in the order.

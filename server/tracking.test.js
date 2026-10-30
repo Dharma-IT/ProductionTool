@@ -101,15 +101,15 @@ test('delivered packages clear stale duplicate warnings regardless of row order'
   }
 })
 
-test('tracking added removes risk while untracked items keep their warnings', () => {
+test('partial deliveries keep warnings for outstanding packages with tracking', () => {
   const summary = getOrderWarningSummary([
-    aged({ orderNumber: '#7201', date: '10/16/2026', tracking: 'delivered', status: 'Delivered' }),
-    aged({ orderNumber: '#7201', date: '10/16/2026', tracking: 'pending', status: 'In transit' }),
+    aged({ orderNumber: '#partial', date: '10/16/2026', tracking: 'delivered', status: 'Delivered' }),
+    aged({ orderNumber: '#partial', date: '10/16/2026', tracking: 'pending', status: 'In transit' }),
     aged({ orderNumber: '#untracked-partial', date: '10/16/2026', status: 'Delivered' }),
     aged({ orderNumber: '#untracked-partial', date: '10/16/2026', status: 'In progress' }),
     aged({ orderNumber: '#7422', date: '10/16/2026', tracking: 'delivered', status: 'In transit' }),
   ], new Date('2026-10-30T12:00:00Z'))
-  assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#untracked-partial'])
+  assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#partial', '#untracked-partial'])
 })
 
 test('explicitly excluded orders stay out of risk even without tracking', () => {
@@ -121,15 +121,18 @@ test('explicitly excluded orders stay out of risk even without tracking', () => 
   assert.equal(summary.activeOrders.length, orderNumbers.length)
 })
 
-test('tracking added clears overdue counts, warnings and exports without marking delivered', () => {
+test('only named exclusions clear risk; other tracked orders and failed deliveries remain', () => {
   const rows = [
     aged({ orderNumber: '#7412', date: '10/16/2026', tracking: '00040109355001316600333123016', status: 'In progress' }),
     aged({ orderNumber: '#7424', date: '10/16/2026', tracking: '123456', status: 'In transit' }),
     aged({ orderNumber: '#untracked', date: '10/16/2026', tracking: ' ,  ', status: 'In progress' }),
+    aged({ orderNumber: '#7401', date: '10/16/2026', tracking: '940012345', status: 'In transit' }),
+    aged({ orderNumber: '#failed', date: '10/16/2026', tracking: '940098765', status: 'Failed delivery' }),
   ]
   const summary = getOrderWarningSummary(rows, new Date('2026-10-30T12:00:00Z'))
-  assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#untracked'])
-  assert.deepEqual(summary.warningOrders.map(row => row.orderNumber), ['#untracked'])
-  assert.equal(summary.activeOrders.length, 3)
+  assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#untracked', '#7401', '#failed'])
+  assert.deepEqual(new Set(summary.warningOrders.map(row => row.orderNumber)), new Set(['#untracked', '#7401', '#failed']))
+  assert.deepEqual(summary.failedOrders.map(row => row.orderNumber), ['#failed'])
+  assert.equal(summary.activeOrders.length, 4)
   assert.equal(rows[0].status, 'In progress')
 })
