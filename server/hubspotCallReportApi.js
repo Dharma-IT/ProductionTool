@@ -1,4 +1,4 @@
-import { countCalendarDays, getNormalizedTrackingStatus, isDeliveryRiskExcluded, maxRiskAgeDays, reconcileDeliveredShipments } from '../src/services/trackingAnalytics.js'
+import { countCalendarDays, getNormalizedTrackingStatus, isDeliveryRiskExcluded, maxRiskAgeDays, overdueDaysThreshold, reconcileDeliveredShipments } from '../src/services/trackingAnalytics.js'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -31,7 +31,6 @@ const supabaseOrdersHistoryTable = process.env.SUPABASE_ORDERS_HISTORY_TABLE ?? 
 const supabaseCallReportTeamsTable = process.env.SUPABASE_CALL_REPORT_TEAMS_TABLE ?? 'call_report_teams'
 const supabaseAircallCallsTable = process.env.SUPABASE_AIRCALL_CALLS_TABLE ?? 'aircall_calls'
 const excludedTrackingOrderNumbers = readExcludedTrackingOrderNumbers()
-const overdueDaysThreshold = 5
 const manuallyDeliveredTrackingOrders = new Set([
   '#5679', '#5764', '#5765', '#5766', '#5768', '#5769',
   '#5773', '#5775', '#5776', '#5777', '#5780',

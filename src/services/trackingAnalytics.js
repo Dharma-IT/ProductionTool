@@ -1,6 +1,6 @@
 import { isShipmentLate } from './shipmentDetails.js'
 
-export const overdueDaysThreshold = 5
+export const overdueDaysThreshold = 7
 export const maxRiskAgeDays = 30
 const deliveryRiskExcludedOrders = new Set([
   '7424', '7201', '7189', '7422', '7421', '7412', '7296', '7285',

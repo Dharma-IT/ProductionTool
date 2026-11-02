@@ -14,6 +14,15 @@ test('counts the current business day, excludes weekends and the order date', ()
   assert.equal(countOpenDays(parseTrackingDate('10/28/2026'), new Date('2026-10-28T12:00:00Z')), 0)
 })
 
+test('age-based risk starts after seven business days', () => {
+  const rows = [6, 7, 8].map((businessDaysOpen) => ({
+    orderNumber: `#age${businessDaysOpen}`, date: '10/16/2026',
+    status: 'In transit', normalizedStatus: 'transit', businessDaysOpen,
+  }))
+  const summary = getOrderWarningSummary(rows, new Date('2026-10-28T12:00:00Z'))
+  assert.deepEqual(summary.overdueOrders.map((row) => row.orderNumber), ['#age8'])
+})
+
 test('includes #7226 and previously excluded customers/products and deduplicates orders', () => {
   const summary = getOrderWarningSummary([
     aged({ orderNumber: '#7226', name: 'Gladis Ordonez', date: '10/16/2026', status: 'In transit' }),
