@@ -90,7 +90,7 @@ function Tracking() {
   const [exportFormat, setExportFormat] = useState('xlsx')
   const [search, setSearch] = useState('')
   const [pageIndex, setPageIndex] = useState(0)
-  const [refreshRequest, setRefreshRequest] = useState({ live: false, version: 0 })
+  const [refreshRequest, setRefreshRequest] = useState({ live: true, version: 0 })
   const activeReport = report
   const activeStatus = status
   const activeError = error
@@ -127,7 +127,7 @@ function Tracking() {
       }
     }
     load(refreshRequest.live)
-    const interval = window.setInterval(() => load(), trackingAutoRefreshMs)
+    const interval = window.setInterval(() => load(true), trackingAutoRefreshMs)
     return () => {
       controller.abort()
       window.clearInterval(interval)
@@ -136,10 +136,6 @@ function Tracking() {
 
   function refreshTracking() {
     setRefreshRequest((current) => ({ live: true, version: current.version + 1 }))
-  }
-
-  function refreshTrackingFromCache() {
-    setRefreshRequest((current) => ({ live: false, version: current.version + 1 }))
   }
 
   const matchingRows = useMemo(() => {
@@ -230,17 +226,9 @@ function Tracking() {
           className="filter-button"
           disabled={activeStatus === 'loading'}
           type="button"
-          onClick={refreshTrackingFromCache}
-        >
-          Refresh
-        </button>
-        <button
-          className="filter-button"
-          disabled={activeStatus === 'loading'}
-          type="button"
           onClick={refreshTracking}
         >
-          Refresh Live
+          Refresh
         </button>
         <div className="tracking-export-actions">
           <label htmlFor="tracking-export-format">Export delivery risks as</label>
