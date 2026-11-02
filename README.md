@@ -13,6 +13,16 @@ npm run api
 npm run dev
 ```
 
+To test local Tracking API changes when `.env.local` points to a hosted API,
+create `.env.development.local` with:
+
+```txt
+VITE_SHOPIFY_TRACKING_URL=http://127.0.0.1:3001/api/shopify/tracking
+```
+
+Keep `npm run api` running alongside Vite. This override applies only to development;
+production builds continue using their configured hosted API.
+
 ## Deployment
 
 Deploy the frontend to Vercel and the backend API to Render.
