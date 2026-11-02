@@ -263,10 +263,16 @@ function Tracking() {
         </div>
       </div>
 
-      <div className="tracking-history-controls" role="status">
-        {complete
-          ? `All ${report.rows.length} records checked. Risk totals cover every page.`
-          : `${status === 'error' ? 'Scan incomplete' : 'Checking all records'} - ${report.rows.length} records available. Risk totals and search results are partial until the scan completes.`}
+      <div className={`tracking-history-controls tracking-scan-status${status === 'loading' ? ' is-scanning' : ''}`} role="status" aria-live="polite" aria-atomic="true">
+        {status === 'loading' && <span className="tracking-scanner" aria-hidden="true"><span /></span>}
+        <div>
+          <strong>{complete ? 'Scan complete' : status === 'error' ? 'Scan incomplete' : 'Still scanning…'}</strong>
+          <span className="tracking-scan-description">
+            {complete
+              ? `All ${report.rows.length.toLocaleString()} records checked. Risk totals cover every page.`
+              : `${report.rows.length.toLocaleString()} records loaded. Risk totals and search results are partial until the scan completes.`}
+          </span>
+        </div>
       </div>
 
       {activeError && <div className="report-alert">{activeError}</div>}

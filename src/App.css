@@ -3849,3 +3849,37 @@
 .shipment-update strong { text-transform: capitalize; }
 .shipment-update small { display: block; color: #686453; }
 .shipment-update .tracking-status { justify-self: start; }
+
+.tracking-scan-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.tracking-scan-status strong { display: block; color: #145548; }
+.tracking-scan-description { display: block; margin-top: 4px; font-size: 0.82rem; }
+.tracking-scanner {
+  position: relative;
+  display: block;
+  flex: 0 0 40px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid #a9cbbd;
+  border-radius: 9px;
+  background: repeating-linear-gradient(0deg, transparent, transparent 7px, #d5e7dd 8px), #eff8f2;
+}
+.tracking-scanner span {
+  position: absolute;
+  inset: 0 4px auto;
+  height: 3px;
+  border-radius: 3px;
+  background: #147858;
+  box-shadow: 0 0 10px #58bd8c;
+  animation: tracking-scan-sweep 1.6s ease-in-out infinite alternate;
+}
+@keyframes tracking-scan-sweep {
+  from { transform: translateY(5px); }
+  to { transform: translateY(31px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tracking-scanner span { animation: none; transform: translateY(18px); }
+}
