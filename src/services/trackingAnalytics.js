@@ -1,3 +1,5 @@
+import { isShipmentLate } from './shipmentDetails.js'
+
 export const overdueDaysThreshold = 5
 export const maxRiskAgeDays = 30
 const deliveryRiskExcludedOrders = new Set([
@@ -127,11 +129,15 @@ export function getOrderWarningSummary(rows, today = getTrackingBusinessToday())
       && countCalendarDays(parseTrackingDate(row.date), today) <= maxRiskAgeDays
     nextOrder.failed = nextOrder.failed || (withinRiskWindow && row.normalizedStatus === 'failed')
     nextOrder.overdue = nextOrder.overdue
-      || (withinRiskWindow && row.normalizedStatus !== 'unknown' && row.normalizedStatus !== 'delivered' && row.businessDaysOpen > overdueDaysThreshold)
+      || (withinRiskWindow && row.normalizedStatus !== 'delivered' && (
+        (row.normalizedStatus !== 'unknown' && row.businessDaysOpen > overdueDaysThreshold)
+        || (row.shipmentDetails ?? []).some((shipment) => isShipmentLate(shipment, today))
+      ))
     nextOrder.active = nextOrder.active
       || (row.normalizedStatus !== 'delivered' && row.normalizedStatus !== 'failed')
 
     const shouldUseRowDetails = row.normalizedStatus === 'failed'
+      || (!nextOrder.status && (row.shipmentDetails ?? []).some((shipment) => isShipmentLate(shipment, today)))
       || row.businessDaysOpen > nextOrder.businessDaysOpen
 
     if (shouldUseRowDetails) {
@@ -140,6 +146,11 @@ export function getOrderWarningSummary(rows, today = getTrackingBusinessToday())
       nextOrder.businessDaysOpen = row.businessDaysOpen
       nextOrder.name = row.name
     }
+
+    nextOrder.shipmentDetails = [...new Map(
+      [...(nextOrder.shipmentDetails ?? []), ...(row.shipmentDetails ?? [])]
+        .map((shipment) => [shipment.fulfillmentId, shipment]),
+    ).values()]
 
     ordersByKey.set(orderKey, nextOrder)
   })

@@ -897,7 +897,7 @@
 
 .tracking-table {
   width: 100%;
-  min-width: 100%;
+  min-width: 1600px;
   table-layout: fixed;
   border-collapse: collapse;
   border-spacing: 0;
@@ -906,7 +906,7 @@
 }
 
 .tracking-panel .table-shell {
-  overflow-x: visible;
+  overflow-x: auto;
   border: 1px solid #d8d4bd;
   border-radius: 8px;
   background: #fbfbf4;
@@ -3838,3 +3838,14 @@
   border: 1px solid #ccd8d3; border-radius: 6px;
   background: #fff; color: #233c30; font: inherit;
 }
+
+.tracking-table .shipment-updates {
+  width: 290px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.shipment-update { display: grid; gap: 5px; padding: 8px 0; }
+.shipment-update + .shipment-update { border-top: 1px solid #d8d4bd; }
+.shipment-update strong { text-transform: capitalize; }
+.shipment-update small { display: block; color: #686453; }
+.shipment-update .tracking-status { justify-self: start; }

@@ -14,6 +14,8 @@ import {
   verifyAircallWebhookToken,
 } from './aircall.js'
 import { fetchAircallAnalyticsCalls } from './aircallAnalytics.js'
+import { enrichShopifyShipments } from './shopifyShipmentDetails.js'
+import { isShipmentLate } from '../src/services/shipmentDetails.js'
 
 loadLocalEnv()
 
@@ -869,8 +871,9 @@ function buildTrackingDatabaseRow(row, sourceUpdatedAt) {
     status: row.status || null,
     status_source: row.statusSource || null,
     business_days_open: daysOpen,
-    is_overdue: !isDeliveryRiskExcluded(row) && !delivered && getNormalizedTrackingStatus(row.status) !== 'unknown'
-      && daysOpen > overdueDaysThreshold
+    is_overdue: !isDeliveryRiskExcluded(row) && !delivered
+      && ((getNormalizedTrackingStatus(row.status) !== 'unknown' && daysOpen > overdueDaysThreshold)
+        || (row.shipmentDetails ?? []).some((shipment) => isShipmentLate(shipment)))
       && countCalendarDays(ageStartDate) <= maxRiskAgeDays,
     observation: row.observation || null,
     raw_data: row,
@@ -899,6 +902,8 @@ function normalizeTrackingDatabaseRow(row) {
     isOverdue: Boolean(row.is_overdue),
     sourceUpdatedAt: row.source_updated_at ?? null,
     syncedAt: row.synced_at ?? null,
+    shipmentDetails: row.raw_data?.shipmentDetails ?? [],
+    shipmentDetailsError: row.raw_data?.shipmentDetailsError ?? '',
     financialStatus: row.raw_data?.financialStatus ?? row.raw_data?.financial_status ?? '',
     cancelledAt: row.raw_data?.cancelledAt ?? row.raw_data?.cancelled_at ?? '',
   }
@@ -1616,11 +1621,12 @@ function readLineItemFulfillments(order, lineItem) {
   const matchingFulfillments = (order.fulfillments ?? []).filter((fulfillment) =>
     (fulfillment.line_items ?? []).some((fulfillmentLineItem) =>
       String(fulfillmentLineItem.id) === String(lineItem.id)
-      || String(fulfillmentLineItem.variant_id) === String(lineItem.variant_id),
+      || (fulfillmentLineItem.id == null && lineItem.variant_id != null
+        && String(fulfillmentLineItem.variant_id) === String(lineItem.variant_id)),
     ),
   )
 
-  return matchingFulfillments.length > 0 ? matchingFulfillments : order.fulfillments ?? []
+  return matchingFulfillments
 }
 
 function readTrackingNumbersFromFulfillments(fulfillments) {
@@ -1678,7 +1684,7 @@ function readShopifyShipmentStatusFromFulfillments(fulfillments) {
     .filter(Boolean)
 
   if (statuses.includes('Failed delivery')) return 'Failed delivery'
-  if (statuses.includes('Delivered')) return 'Delivered'
+  if (fulfillments.length > 0 && fulfillments.every((fulfillment) => mapShopifyShipmentStatus(fulfillment.shipment_status) === 'Delivered')) return 'Delivered'
   if (statuses.includes('In transit')) return 'In transit'
   if (statuses.includes('In progress')) return 'In progress'
 
@@ -1718,6 +1724,8 @@ function normalizeShopifyOrder(order) {
 
   return {
     rowId: String(order.id),
+    shipmentDetails: fulfillments.map((f) => f.shipmentDetails).filter(Boolean),
+    shipmentDetailsError: order.shipmentDetailsError ?? '',
     orderNumber: order.name ?? String(order.order_number ?? order.id),
     item: readOrderItems(order),
     name: readOrderName(order),
@@ -1741,6 +1749,8 @@ function normalizeShopifyOrderLine(order, lineItem, lineItemIndex) {
 
   return {
     rowId: `${order.id}:${lineItem.id ?? lineItemIndex}`,
+    shipmentDetails: fulfillments.map((f) => f.shipmentDetails).filter(Boolean),
+    shipmentDetailsError: order.shipmentDetailsError ?? '',
     orderNumber: order.name ?? String(order.order_number ?? order.id),
     suplifulOrder: readLineItemProperty(lineItem, ['supliful', 'fulfillment order', 'order id']),
     item: lineItem.name || lineItem.title || '',
@@ -1896,6 +1906,12 @@ async function buildShopifyTrackingReport(options = {}) {
       .filter(Boolean),
   )
   const visibleOrders = orders.filter((order) => !isRefundedOrCancelledShopifyOrder(order))
+  try {
+    await enrichShopifyShipments(visibleOrders, shopifyGraphql)
+  } catch (error) {
+    // Keep the base tracking report usable, and expose the missing enrichment.
+    visibleOrders.forEach((order) => { order.shipmentDetailsError = error.message })
+  }
   const rows = filterExcludedTrackingOrders(visibleOrders.flatMap((order) => {
     const lineItems = order.line_items ?? []
 

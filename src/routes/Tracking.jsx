@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadAllShopifyTracking } from '../services/shopifyTracking'
+import { formatShipmentDate, isShipmentLate } from '../services/shipmentDetails'
 import { countOpenDays, getNormalizedTrackingStatus, getOrderWarningSummary, getTrackingOrderKey, overdueDaysThreshold, parseTrackingDate, reconcileDeliveredShipments } from '../services/trackingAnalytics'
 
 const trackingHeaders = [
@@ -14,6 +15,7 @@ const trackingHeaders = [
   'Tracking',
   'Delivery Date',
   'Status',
+  'Shipment updates',
 ]
 const trackingRowsPageSize = 100
 const trackingAutoRefreshMs = 5 * 60 * 1000
@@ -29,6 +31,9 @@ const trackingExportFields = [
   ['Tracking', 'tracking'],
   ['Delivery Date', 'deliveryDate'],
   ['Status', 'status'],
+  ['Estimated arrival', 'estimatedArrival'],
+  ['Late shipment', 'lateShipment'],
+  ['Latest shipment update', 'latestShipmentUpdate'],
 ]
 
 function displayCell(value) {
@@ -140,7 +145,7 @@ function Tracking() {
 
   const matchingRows = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return report.rows.filter((row) => !query || trackingExportFields.some(([, field]) =>
+    return report.rows.filter((row) => !query || JSON.stringify(row.shipmentDetails ?? []).toLowerCase().includes(query) || trackingExportFields.some(([, field]) =>
       String(row[field] ?? '').toLowerCase().includes(query),
     ))
   }, [report.rows, search])
@@ -184,10 +189,17 @@ function Tracking() {
   function exportDeliveryRisks() {
     if (analytics.overdueOrders.length === 0) return
 
-    const exportRows = analytics.overdueOrders.map((row) => Object.fromEntries(
-      trackingExportFields.map(([header, field]) => [header, row[field] ?? '']),
-    ))
-    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: trackingHeaders })
+    const exportRows = analytics.overdueOrders.map((row) => {
+      const shipments = row.shipmentDetails ?? []
+      const values = {
+        ...row,
+        estimatedArrival: shipments.map((s) => formatShipmentDate(s.estimatedDeliveryAt, s.timeZone)).join('; '),
+        lateShipment: shipments.some((s) => isShipmentLate(s)) ? 'Yes' : 'No',
+        latestShipmentUpdate: shipments.map((s) => s.latestMessage).filter(Boolean).join('; '),
+      }
+      return Object.fromEntries(trackingExportFields.map(([header, field]) => [header, values[field] ?? '']))
+    })
+    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: trackingExportFields.map(([header]) => header) })
     const dateStamp = new Date().toISOString().slice(0, 10)
 
     if (exportFormat === 'csv') {
@@ -269,7 +281,7 @@ function Tracking() {
                 {' '}
                 {overdueDaysThreshold}
                 {' '}
-                business days
+                business days, past estimated arrival, or reported late by the carrier
               </small>
             </div>
             <div className="tracking-risk-graphic" aria-hidden="true">
@@ -418,6 +430,21 @@ function Tracking() {
                     ) : (
                       ''
                     )}
+                  </td>
+                  <td className="shipment-updates">
+                    {row.shipmentDetails?.length ? row.shipmentDetails.map((shipment) => (
+                      <div className="shipment-update" key={shipment.fulfillmentId}>
+                        <strong>{shipment.status?.replaceAll('_', ' ').toLowerCase()}</strong>
+                        {isShipmentLate(shipment) && row.normalizedStatus !== 'delivered' && getNormalizedTrackingStatus(row.status) !== 'delivered' && <span className="tracking-status failed">Late</span>}
+                        {row.shipmentDetails.length > 1 && <small>{shipment.tracking.map((tracking) => tracking.number).join(', ') || shipment.fulfillmentId.split('/').pop()}</small>}
+                        <div>Estimated arrival: {formatShipmentDate(shipment.estimatedDeliveryAt, shipment.timeZone)} (ET)</div>
+                        {shipment.deliveredAt && <div>Delivered: {formatShipmentDate(shipment.deliveredAt, shipment.timeZone)}</div>}
+                        <div>{shipment.latestMessage || 'No carrier update available'}</div>
+                        {shipment.latestEventAt && <small>Update: {formatShipmentDate(shipment.latestEventAt, shipment.timeZone)}</small>}
+                        <small>Shopify · Checked {new Date(shipment.checkedAt).toLocaleString()}</small>
+                      </div>
+                    )) : 'Shipment details not available'}
+                    {row.shipmentDetailsError && <small role="status">Shipment detail sync failed; refresh to retry.</small>}
                   </td>
                 </tr>
               ))}

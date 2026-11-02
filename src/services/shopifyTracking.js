@@ -1,6 +1,6 @@
 import { collectTrackingPages } from './trackingPagination'
 
-const sessionCacheKey = 'shopify-tracking-report:v6'
+const sessionCacheKey = 'shopify-tracking-report:v7'
 const defaultRowsLimit = 1000
 const sessionCacheTtlMs = 5 * 60 * 1000
 
@@ -27,6 +27,8 @@ function normalizeTrackingRow(row) {
     status: row.status ?? '',
     statusSource: row.statusSource ?? '',
     observation: row.observation ?? '',
+    shipmentDetails: row.shipmentDetails ?? [],
+    shipmentDetailsError: row.shipmentDetailsError ?? '',
     financialStatus: row.financialStatus ?? row.financial_status ?? '',
     cancelledAt: row.cancelledAt ?? row.cancelled_at ?? '',
   }
