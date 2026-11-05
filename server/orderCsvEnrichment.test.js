@@ -79,6 +79,22 @@ test('deduplicates repeated forms, keeps the latest completion, and excludes sup
   assert.equal(warnings[0].completionDate, '2026-10-29T12:00:00Z')
 })
 
+test('limits warnings to forms completed on the fetched UTC date before deduplicating', () => {
+  const lookup = buildOrderCsvLookup([
+    csvRow({ purchaseSurveyCompletionDate: '2026-10-26T00:00:00Z' }),
+    csvRow({ purchaseSurveyCompletionDate: '2026-10-26T23:59:59Z' }),
+    csvRow({ purchaseSurveyCompletionDate: '2026-10-27T00:00:00Z' }),
+    csvRow({ phone: '15550000000', purchaseSurveyCompletionDate: '2026-10-25T23:59:59Z' }),
+    csvRow({ phone: '15550000001', purchaseSurveyCompletionDate: '' }),
+    csvRow({ phone: '15550000002', purchaseSurveyCompletionDate: 'invalid' }),
+  ])
+  const warnings = findMedicalFormOrderWarnings([], lookup, '2026-10-26')
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0].completionDate, '2026-10-26T23:59:59Z')
+  assert.deepEqual(findMedicalFormOrderWarnings([order()], lookup, '2026-10-26'), [])
+  assert.deepEqual(findMedicalFormOrderWarnings([], lookup, '2026-10-28'), [])
+})
+
 test('reconciles name fallback and empty identifiers without matching unidentified records', () => {
   const lookup = buildOrderCsvLookup([csvRow({ phone: '' })])
   assert.deepEqual(findMedicalFormOrderWarnings([order({ number: '' })], lookup), [])

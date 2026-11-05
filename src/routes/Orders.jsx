@@ -105,8 +105,8 @@ function Orders() {
   )
   const displayedRows = striveEnrichment.rows
   const medicalWarnings = useMemo(
-    () => csvLookup ? findMedicalFormOrderWarnings(rows, csvLookup) : [],
-    [rows, csvLookup],
+    () => csvLookup ? findMedicalFormOrderWarnings(rows, csvLookup, request.date) : [],
+    [rows, csvLookup, request.date],
   )
   const visibleRows = activeView === 'history' ? historyRows : displayedRows
   const visibleHeaders = activeView === 'history'
@@ -507,7 +507,7 @@ function Orders() {
                 <h2 id="orders-reconciliation-title">Medical forms missing from fetched orders</h2>
                 <p>{activeView === 'history'
                   ? 'Saved warnings across all report dates, newest first.'
-                  : `Comparing all medical records in ${csvFileName} with HubSpot orders fetched for ${request.date}.`}</p>
+                  : `Comparing medical forms completed on ${request.date} (UTC) in ${csvFileName} with HubSpot orders fetched for the same date.`}</p>
               </div>
               <strong role="status">{visibleWarnings.length} to review</strong>
             </div>
@@ -531,7 +531,7 @@ function Orders() {
                   ))}</tbody>
                 </table>
               </div>
-            ) : <p role="status">All medical-form records have matching fetched items.</p>}
+            ) : <p role="status">No missing medical-form records for {activeView === 'history' ? 'the saved report dates' : request.date}.</p>}
           </section>
         )}
 

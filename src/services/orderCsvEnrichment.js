@@ -264,7 +264,7 @@ export function buildOrderCsvLookup(csvRows) {
   return { byPhone, byName, records, rowCount: csvRows.length }
 }
 
-export function findMedicalFormOrderWarnings(orders, lookup) {
+export function findMedicalFormOrderWarnings(orders, lookup, reportDate) {
   const patientMatches = new Set()
   const itemMatches = new Set()
   orders.forEach((order) => {
@@ -276,6 +276,10 @@ export function findMedicalFormOrderWarnings(orders, lookup) {
 
   const warnings = new Map()
   lookup.records.forEach((record, index) => {
+    if (reportDate) {
+      const timestamp = Date.parse(record.purchaseSurveyCompletionDate)
+      if (Number.isNaN(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== reportDate) return
+    }
     if (!medicalProducts(record.purchase).size || itemMatches.has(record)) return
     const clientName = [record.firstName, record.lastName].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
     const identity = normalizePhone(record.phone) || normalizeName(clientName) || `row-${index}`
