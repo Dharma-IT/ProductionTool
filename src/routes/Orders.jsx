@@ -111,7 +111,10 @@ function Orders() {
     () => csvLookup ? findMedicalFormOrderWarnings(rows, csvLookup, request.date) : [],
     [rows, csvLookup, request.date],
   )
-  const visibleRows = activeView === 'history' ? historyRows : displayedRows
+  const pendingMedicalRows = displayedRows.filter((row) =>
+    normalizeOrderStatus(cellEdits[row.id]?.medicalForm ?? row.medicalForm) === 'PENDING')
+  const visibleRows = activeView === 'history' ? historyRows
+    : activeView === 'pending' ? pendingMedicalRows : displayedRows
   const visibleHeaders = activeView === 'history'
     ? [...orderHeaders, { key: 'reportDate', label: 'Report Date' }]
     : orderHeaders
@@ -420,10 +423,11 @@ function Orders() {
 
         <div className="orders-view-tabs" aria-label="Orders views">
           <button className={activeView === 'current' ? 'active' : ''} type="button" onClick={() => setActiveView('current')}>Current orders</button>
+          <button className={activeView === 'pending' ? 'active' : ''} type="button" onClick={() => setActiveView('pending')}>Pending medical forms ({pendingMedicalRows.length})</button>
           <button className={activeView === 'history' ? 'active' : ''} type="button" onClick={() => { if (activeView === 'history') return; setHistoryStatus('loading'); setHistoryRows([]); setHistoryReport(null); setActiveView('history') }}>Historical data</button>
         </div>
 
-        {activeView === 'current' ? <form className="report-filters" aria-label="Orders date filter" onSubmit={submitDate}>
+        {activeView !== 'history' ? <form className="report-filters" aria-label="Orders date filter" onSubmit={submitDate}>
         <span className="filter-label">Paid Date (All Pipelines)</span>
         <input
           aria-label="Paid date"
@@ -463,7 +467,7 @@ function Orders() {
           {saveStatus === 'saving' ? 'Saving…' : 'Save final result'}
         </button>
         <select
-          aria-label="Export current orders"
+          aria-label={activeView === 'pending' ? 'Export pending medical forms' : 'Export current orders'}
           className="orders-export-select"
           defaultValue=""
           disabled={visibleRows.length === 0}
@@ -503,6 +507,10 @@ function Orders() {
         {striveCsvError && <div className="report-alert" role="alert">{striveCsvError}</div>}
         {saveMessage && <div className="orders-save-message" role="status">{saveMessage}</div>}
         {activeView === 'current' && autoSaveMessage && <div className="orders-save-message" role="status">{autoSaveMessage}</div>}
+
+        {activeView === 'pending' && (
+          <p role="status">Orders with a PENDING medical form for {request.date}. Upload the customer CSV to check medical form status.</p>
+        )}
 
         {((activeView === 'current' && status === 'ready' && csvLookup) || (activeView === 'history' && historyReport?.reportCount > 0)) && (
           <section className="orders-reconciliation" aria-labelledby="orders-reconciliation-title">
@@ -562,7 +570,8 @@ function Orders() {
                   <td colSpan={visibleHeaders.length}>
                     {activeView === 'history'
                       ? historyStatus === 'loading' ? 'Loading saved orders...' : historyStatus === 'error' ? 'Could not load saved orders' : 'No historical data saved'
-                      : status === 'loading' ? 'Loading HubSpot orders…' : 'No paid orders found for this date'}
+                      : status === 'loading' ? 'Loading HubSpot orders…'
+                        : activeView === 'pending' ? 'No pending medical forms for this date' : 'No paid orders found for this date'}
                   </td>
                 </tr>
               )}

@@ -15,6 +15,15 @@ test('preserves legacy dates while snapshots replace stale rows for their own da
   assert.deepEqual(readOrdersSnapshot([]).rows, [])
 })
 
+test('CSV imports stay visible alongside snapshots and snapshot replacements', () => {
+  const imported = { id: 'csv-1', rowId: 'csv-1', reportDate: '2026-10-29', recordType: 'orders-csv-import' }
+  for (const rows of [[], [{ id: 'current' }], [imported]]) {
+    const snapshot = buildOrdersSnapshot(rows, '2026-10-29', 'portal.csv', [])
+    const report = readOrdersSnapshot([snapshot, imported])
+    assert.equal(report.rows.filter((row) => row.id === 'csv-1').length, 1)
+  }
+})
+
 test('saves and reloads complete dated reports, warnings, replacements, and history edits', async () => {
   const records = new Map()
   let failWrites = false

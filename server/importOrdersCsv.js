@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { createHash } from 'node:crypto'
 import XLSX from 'xlsx'
+import { readOrdersSnapshot } from './ordersSnapshots.js'
 
 // Dry run by default. --apply inserts missing source rows without overwriting edits.
 const args = process.argv.slice(2)
@@ -77,9 +78,7 @@ async function request(query, options = {}) {
   const text = await response.text()
   return text ? JSON.parse(text) : null
 }
-// Snapshots take precedence in the history UI. Stop instead of inserting hidden rows.
-const snapshots = await request(`select=row_id&report_date=gte.${startDate}&raw_data->>recordType=eq.orders-report-snapshot`)
-if (snapshots.length) throw new Error('Existing report snapshots need reconciliation before importing this date range.')
+// CSV imports remain visible alongside saved report snapshots.
 let verified = 0
 for (let offset = 0; offset < databaseRows.length; offset += 100) {
   const batch = databaseRows.slice(offset, offset + 100)
@@ -101,4 +100,15 @@ for (let offset = 0; offset < databaseRows.length; offset += 100) {
     verified++
   }
 }
-console.log(JSON.stringify({ verifiedRows: verified, table, status: 'complete' }))
+const records = []
+for (let offset = 0; ; offset += 500) {
+  const batch = await request(new URLSearchParams({ select: 'row_id,report_date,raw_data',
+    order: 'report_date.desc,imported_at.desc,row_id.asc', limit: '500', offset: String(offset) }))
+  records.push(...batch.map((row) => ({ ...row.raw_data, id: row.row_id, rowId: row.row_id, reportDate: row.report_date })))
+  if (batch.length < 500) break
+}
+const history = readOrdersSnapshot(records)
+const visibleIds = new Set(history.rows.map((row) => row.rowId || row.id))
+if (databaseRows.some((row) => !visibleIds.has(row.row_id))) throw new Error('Imported rows missing from history.')
+console.log(JSON.stringify({ verifiedRows: verified, visibleSourceRows: databaseRows.length,
+  totalHistoryRows: history.rows.length, table, status: 'complete' }))

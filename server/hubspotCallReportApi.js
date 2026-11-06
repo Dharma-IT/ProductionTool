@@ -4059,13 +4059,20 @@ const server = createServer(async (request, response) => {
         await upsertOrdersHistoryRowsToSupabase([snapshot], reportDate, payload.sourceFileName)
       } else {
         const existing = readOrdersSnapshot(await loadOrdersHistoryRowsFromSupabase(reportDate))
+        const importedById = new Map(existing.rows
+          .filter((row) => row.recordType === 'orders-csv-import')
+          .map((row) => [row.rowId || row.id, row]))
+        const importedEdits = rows.filter((row) => importedById.has(row.rowId || row.id))
+          .map((row) => ({ ...importedById.get(row.rowId || row.id), ...row, recordType: 'orders-csv-import' }))
+        await upsertOrdersHistoryRowsToSupabase(importedEdits, reportDate, payload.sourceFileName)
+        const otherEdits = rows.filter((row) => !importedById.has(row.rowId || row.id))
         if (existing.snapshot) {
-          const edits = new Map(rows.map((row) => [row.rowId || row.id, row]))
+          const edits = new Map(otherEdits.map((row) => [row.rowId || row.id, row]))
           const snapshot = { ...existing.snapshot, savedAt: new Date().toISOString(),
-            rows: existing.rows.map((row) => ({ ...row, ...edits.get(row.rowId || row.id) })) }
+            rows: existing.snapshot.rows.map((row) => ({ ...row, ...edits.get(row.rowId || row.id) })) }
           await upsertOrdersHistoryRowsToSupabase([snapshot], reportDate, snapshot.sourceFileName)
         } else {
-          await upsertOrdersHistoryRowsToSupabase(rows, reportDate, payload.sourceFileName)
+          await upsertOrdersHistoryRowsToSupabase(otherEdits, reportDate, payload.sourceFileName)
         }
       }
       const history = readOrdersSnapshot(await loadOrdersHistoryRowsFromSupabase(reportDate))

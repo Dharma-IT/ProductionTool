@@ -18,10 +18,14 @@ export function buildOrdersSnapshot(rows, reportDate, sourceFileName, warnings) 
 export function readOrdersSnapshot(records) {
   const snapshots = records.filter((row) => row.recordType === 'orders-report-snapshot')
   const savedDates = new Set(snapshots.map((row) => row.reportDate))
+  const importedRows = records.filter((row) => row.recordType === 'orders-csv-import')
+  const importedIds = new Set(importedRows.map((row) => row.rowId || row.id))
   return {
     rows: [
-      ...snapshots.flatMap((snapshot) => snapshot.rows),
-      ...records.filter((row) => row.recordType !== 'orders-report-snapshot' && !savedDates.has(row.reportDate)),
+      ...snapshots.flatMap((snapshot) => snapshot.rows).filter((row) => !importedIds.has(row.rowId || row.id)),
+      ...importedRows,
+      ...records.filter((row) => row.recordType !== 'orders-report-snapshot'
+        && row.recordType !== 'orders-csv-import' && !savedDates.has(row.reportDate)),
     ].sort((left, right) => String(right.reportDate || '').localeCompare(String(left.reportDate || ''))),
     warnings: snapshots.flatMap((snapshot) => snapshot.warnings.map((warning) => ({
       ...warning, id: `${snapshot.reportDate}:${warning.id}`, reportDate: snapshot.reportDate,
