@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
-import { loadOrdersHistory, saveOrdersHistory } from '../services/ordersHistory'
+import { acceptPendingMedicalForm, loadOrdersHistory, loadPendingMedicalForms, reconcilePendingMedicalForms, saveOrdersHistory } from '../services/ordersHistory'
 import { formatOrderPurchaseDate } from '../services/orderDates'
+import { isOrderHistoryEligible } from '../services/orderHistoryEligibility'
+import { isCompletedOrder } from '../services/pendingMedicalForms'
 import { formatOrderExportValue, getOrderExportHeaders } from '../services/orderExport'
 import {
   buildOrderCsvLookup,
@@ -73,6 +75,7 @@ function Orders() {
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
   const [csvLookup, setCsvLookup] = useState(null)
+  const [medicalUploadRows, setMedicalUploadRows] = useState(null)
   const [csvFileName, setCsvFileName] = useState('')
   const [csvError, setCsvError] = useState('')
   const [striveCsvLookup, setStriveCsvLookup] = useState(null)
@@ -81,6 +84,8 @@ function Orders() {
   const [cellEdits, setCellEdits] = useState({})
   const [activeView, setActiveView] = useState('current')
   const [historyRows, setHistoryRows] = useState([])
+  const [savedPendingRows, setSavedPendingRows] = useState([])
+  const [pendingStatus, setPendingStatus] = useState('idle')
   const [historyReport, setHistoryReport] = useState(null)
   const [historyStatus, setHistoryStatus] = useState('idle')
   const [autoSaveMessage, setAutoSaveMessage] = useState('')
@@ -88,7 +93,7 @@ function Orders() {
   const queueSnapshotSave = useCallback((snapshot) => {
     const next = saveQueue.current.catch(() => {}).then(() => saveOrdersHistory(
       snapshot.rows, snapshot.reportDate, snapshot.sourceFileName,
-      { snapshot: true, warnings: snapshot.warnings },
+      { snapshot: true, warnings: snapshot.warnings, workflowComplete: snapshot.workflowComplete },
     ))
     saveQueue.current = next
     return next
@@ -108,12 +113,14 @@ function Orders() {
   )
   const displayedRows = useMemo(() => striveEnrichment.rows.map(normalizeOrderStatuses), [striveEnrichment.rows])
   const medicalWarnings = useMemo(
-    () => csvLookup ? findMedicalFormOrderWarnings(rows, csvLookup, request.date) : [],
-    [rows, csvLookup, request.date],
+    () => csvLookup ? findMedicalFormOrderWarnings(rows, csvLookup, request.date, savedPendingRows, historyRows) : [],
+    [rows, csvLookup, request.date, savedPendingRows, historyRows],
   )
-  const pendingMedicalRows = displayedRows.filter((row) =>
-    normalizeOrderStatus(cellEdits[row.id]?.medicalForm ?? row.medicalForm) === 'PENDING')
-  const visibleRows = activeView === 'history' ? historyRows
+  const pendingMedicalRows = savedPendingRows
+  const historicalRows = historyRows.filter((row) =>
+    isOrderHistoryEligible(row) && (normalizeOrderStatus(cellEdits[row.id]?.medicalForm ?? row.medicalForm) !== 'PENDING'
+      || isCompletedOrder({ ...row, ...cellEdits[row.id] })))
+  const visibleRows = activeView === 'history' ? historicalRows
     : activeView === 'pending' ? pendingMedicalRows : displayedRows
   const visibleHeaders = activeView === 'history'
     ? [...orderHeaders, { key: 'reportDate', label: 'Report Date' }]
@@ -121,16 +128,17 @@ function Orders() {
   const visibleWarnings = activeView === 'history' ? historyReport?.warnings ?? [] : medicalWarnings
   const snapshotPayload = useMemo(() => ({
     rows: displayedRows, reportDate: request.date, sourceFileName: csvFileName, warnings: medicalWarnings,
-  }), [displayedRows, request.date, csvFileName, medicalWarnings])
+    workflowComplete: Boolean(csvLookup && striveCsvLookup),
+  }), [displayedRows, request.date, csvFileName, medicalWarnings, csvLookup, striveCsvLookup])
 
   useEffect(() => {
-    if (status !== 'ready' || !csvLookup) return undefined
+    if (status !== 'ready' || !csvLookup || !striveCsvLookup) return undefined
     let active = true
     queueSnapshotSave(snapshotPayload)
-      .then(() => { if (active) setAutoSaveMessage(`Automatically saved for ${snapshotPayload.reportDate}.`) })
+      .then(() => { if (active) setAutoSaveMessage(`Automatically saved for ${snapshotPayload.reportDate}: pending medical forms to Pending, YES or Strive-matched orders to Historical data.`) })
       .catch((saveError) => { if (active) setAutoSaveMessage(`Automatic save failed: ${saveError.message}. Use Save final result to retry.`) })
     return () => { active = false }
-  }, [status, csvLookup, snapshotPayload, queueSnapshotSave])
+  }, [status, csvLookup, striveCsvLookup, snapshotPayload, queueSnapshotSave])
   const treatmentColorLookup = useMemo(() => {
     const lookup = new Map()
     visibleRows.forEach((row) => {
@@ -145,7 +153,16 @@ function Orders() {
   }, [cellEdits, visibleRows])
 
   useEffect(() => {
-    if (activeView !== 'history') return undefined
+    let active = true
+    saveQueue.current.catch(() => {}).then(() => loadPendingMedicalForms()).then((report) => {
+      if (active) { setSavedPendingRows(report.rows); setPendingStatus('ready') }
+    }).catch((loadError) => {
+      if (active) { setPendingStatus('error'); setSaveMessage(loadError.message) }
+    })
+    return () => { active = false }
+  }, [activeView])
+
+  useEffect(() => {
     let active = true
     saveQueue.current.catch(() => {}).then(() => loadOrdersHistory())
       .then((report) => {
@@ -188,6 +205,7 @@ function Orders() {
     setStatus('loading')
     setError('')
     setCsvLookup(null)
+    setMedicalUploadRows(null)
     setAutoSaveMessage('')
     setCsvFileName('')
     setCsvError('')
@@ -221,8 +239,11 @@ function Orders() {
       }
 
       setCsvLookup(buildOrderCsvLookup(csvRows))
+      setMedicalUploadRows(csvRows)
       setCsvFileName(file.name)
-      setAutoSaveMessage('Saving uploaded report automatically...')
+      setAutoSaveMessage('Medical forms imported. Upload the Strive file to automatically save both tabs.')
+      const pendingReport = await reconcilePendingMedicalForms(csvRows)
+      setSavedPendingRows(pendingReport.rows)
     } catch (uploadError) {
       setCsvError(uploadError instanceof Error ? uploadError.message : 'Unable to read this CSV file.')
     } finally {
@@ -252,6 +273,10 @@ function Orders() {
 
       setStriveCsvLookup(buildStriveCsvLookup(csvRows))
       setStriveCsvFileName(file.name)
+      if (medicalUploadRows) {
+        const pendingReport = await reconcilePendingMedicalForms(medicalUploadRows, csvRows)
+        setSavedPendingRows(pendingReport.rows)
+      }
     } catch (uploadError) {
       setStriveCsvError(uploadError instanceof Error ? uploadError.message : 'Unable to read this Strive CSV file.')
     } finally {
@@ -263,6 +288,20 @@ function Orders() {
     return Object.hasOwn(cellEdits[row.id] ?? {}, key)
       ? cellEdits[row.id][key]
       : displayCell(row, key)
+  }
+
+  async function acceptPending(row) {
+    setSaveStatus('saving')
+    setSaveMessage('')
+    try {
+      const report = await acceptPendingMedicalForm(row.rowId || row.id)
+      setSavedPendingRows(report.rows)
+      setSaveMessage(`${row.clientName} accepted and saved to Historical data.`)
+    } catch (saveError) {
+      setSaveMessage(saveError.message)
+    } finally {
+      setSaveStatus('idle')
+    }
   }
 
   function updateCell(rowId, key, value) {
@@ -327,8 +366,9 @@ function Orders() {
     setSaveStatus('saving')
     setSaveMessage('')
     try {
-      await queueSnapshotSave({ ...snapshotPayload, rows: displayedRows.map(materializeRow) })
-      setSaveMessage(`${displayedRows.length} rows saved to historical data.`)
+      const rowsToSave = displayedRows.map(materializeRow).filter(isOrderHistoryEligible)
+      await queueSnapshotSave({ ...snapshotPayload, rows: rowsToSave })
+      setSaveMessage(`${rowsToSave.length} rows saved to historical data.`)
     } catch (saveError) {
       setSaveMessage(saveError.message || 'Could not save orders history.')
     } finally {
@@ -358,6 +398,8 @@ function Orders() {
   }
 
   function renderOrderCell(row, header) {
+    if (activeView === 'pending') return <span>{displayCell(row, header.key)}</span>
+    if (row.recordType === 'pending-medical-form-import') return <span>{displayCell(row, header.key)}</span>
     const editableValue = readEditableValue(row, header.key)
     if (header.key === 'reportDate') return <span>{row.reportDate}</span>
 
@@ -423,7 +465,7 @@ function Orders() {
 
         <div className="orders-view-tabs" aria-label="Orders views">
           <button className={activeView === 'current' ? 'active' : ''} type="button" onClick={() => setActiveView('current')}>Current orders</button>
-          <button className={activeView === 'pending' ? 'active' : ''} type="button" onClick={() => setActiveView('pending')}>Pending medical forms ({pendingMedicalRows.length})</button>
+          <button className={activeView === 'pending' ? 'active' : ''} type="button" onClick={() => { if (activeView !== 'pending') setPendingStatus('loading'); setActiveView('pending') }}>Pending medical forms ({pendingMedicalRows.length})</button>
           <button className={activeView === 'history' ? 'active' : ''} type="button" onClick={() => { if (activeView === 'history') return; setHistoryStatus('loading'); setHistoryRows([]); setHistoryReport(null); setActiveView('history') }}>Historical data</button>
         </div>
 
@@ -463,7 +505,7 @@ function Orders() {
             {striveCsvFileName} · {striveEnrichment.matchedCount}/{displayedRows.length} matched · {striveEnrichment.unmatchedCount} unmatched · {striveEnrichment.ambiguousCount} medication mismatch
           </span>
         )}
-        <button className="filter-button orders-save-button" disabled={status !== 'ready' || !csvLookup || saveStatus === 'saving'} type="button" onClick={saveFinalResult}>
+        <button className="filter-button orders-save-button" disabled={status !== 'ready' || !csvLookup || !striveCsvLookup || saveStatus === 'saving'} type="button" onClick={saveFinalResult}>
           {saveStatus === 'saving' ? 'Saving…' : 'Save final result'}
         </button>
         <select
@@ -483,7 +525,7 @@ function Orders() {
         </form> : (
           <div className="report-filters" aria-label="Orders history">
             <span className="filter-label">All saved orders · Newest report date first</span>
-            <span className="timezone-pill">{historyRows.length} saved rows</span>
+            <span className="timezone-pill">{historicalRows.length} saved rows</span>
             {saveStatus === 'saving' && <span className="orders-upload-status">Saving change…</span>}
             <select
               aria-label="Export historical orders"
@@ -509,10 +551,10 @@ function Orders() {
         {activeView === 'current' && autoSaveMessage && <div className="orders-save-message" role="status">{autoSaveMessage}</div>}
 
         {activeView === 'pending' && (
-          <p role="status">Orders with a PENDING medical form for {request.date}. Upload the customer CSV to check medical form status.</p>
+          <p role="status">{pendingStatus === 'loading' ? 'Loading saved pending medical forms…' : pendingStatus === 'error' ? 'Could not load saved pending medical forms.' : `${savedPendingRows.length} imported pending medical forms across all dates.`}</p>
         )}
 
-        {((activeView === 'current' && status === 'ready' && csvLookup) || (activeView === 'history' && historyReport?.reportCount > 0)) && (
+        {activeView === 'current' && status === 'ready' && csvLookup && (
           <section className="orders-reconciliation" aria-labelledby="orders-reconciliation-title">
             <div className="orders-reconciliation-heading">
               <div>
@@ -523,20 +565,21 @@ function Orders() {
               </div>
               <strong role="status">{visibleWarnings.length} to review</strong>
             </div>
-            <p>A warning means the patient or medication/dose was not found in its report date's fetched items. The transaction may be on another date. NAD+ capsules and supplements are excluded.</p>
+            <p>Forms absent from current orders are checked against Pending and Historical data. Last Purchase Date shows the latest matching purchase on or before the form completion date (UTC). NAD+ capsules and supplements are excluded.</p>
             {visibleWarnings.length > 0 ? (
               <div className="orders-reconciliation-scroll">
                 <table className="client-table">
                   <thead><tr>
                     <th scope="col">Portal patient</th><th scope="col">Phone</th>
                     <th scope="col">Medical form product</th><th scope="col">Form completed</th>
-                    <th scope="col">Warning</th>
+                    <th scope="col">Last Purchase Date</th><th scope="col">Status</th>
                     {activeView === 'history' && <th scope="col">Report Date</th>}
                   </tr></thead>
                   <tbody>{visibleWarnings.map((warning) => (
                     <tr key={warning.id}>
                       <td>{warning.clientName || 'Name unavailable'}</td><td>{warning.number || 'Phone unavailable'}</td>
                       <td>{warning.treatment}</td><td>{warning.completionDate || 'Not provided'}</td>
+                      <td>{warning.lastPurchaseDate ? formatOrderPurchaseDate(warning.lastPurchaseDate) : 'Not found'}</td>
                       <td>{warning.reason}</td>
                       {activeView === 'history' && <td>{warning.reportDate}</td>}
                     </tr>
@@ -555,6 +598,7 @@ function Orders() {
                 {visibleHeaders.map((header) => (
                   <th key={header.key} scope="col">{header.label}</th>
                 ))}
+                {activeView === 'pending' && <th scope="col">Review</th>}
               </tr>
             </thead>
             <tbody>
@@ -563,11 +607,18 @@ function Orders() {
                   {visibleHeaders.map((header) => (
                     <td key={header.key}>{renderOrderCell(row, header)}</td>
                   ))}
+                  {activeView === 'pending' && <td>
+                    <span>{row.pendingFormFound ? 'Found on pending' : 'Awaiting medical form'}</span>
+                    {row.pendingFormFound && <button type="button" className="filter-button"
+                      disabled={saveStatus === 'saving' || row.medicalForm !== 'YES'}
+                      onClick={() => acceptPending(row)}>Accept</button>}
+                    {row.pendingFormFound && row.medicalForm !== 'YES' && <span>Complete address required</span>}
+                  </td>}
                 </tr>
               ))}
               {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={visibleHeaders.length}>
+                  <td colSpan={visibleHeaders.length + (activeView === 'pending' ? 1 : 0)}>
                     {activeView === 'history'
                       ? historyStatus === 'loading' ? 'Loading saved orders...' : historyStatus === 'error' ? 'Could not load saved orders' : 'No historical data saved'
                       : status === 'loading' ? 'Loading HubSpot orders…'

@@ -1,3 +1,6 @@
+import { isOrderHistoryEligible } from './orderHistoryEligibility.js'
+import { selectImportedPendingMedicalForms } from './pendingMedicalForms.js'
+
 function getOrdersHistoryEndpoint() {
   if (import.meta.env.VITE_ORDERS_HISTORY_URL) return import.meta.env.VITE_ORDERS_HISTORY_URL
   const configuredEndpoint = import.meta.env.VITE_HUBSPOT_CALL_REPORT_URL
@@ -24,11 +27,32 @@ export async function loadOrdersHistory(date) {
   return readResponse(await fetch(url, { cache: 'no-store' }))
 }
 
+export async function loadPendingMedicalForms() {
+  const url = new URL(getOrdersHistoryEndpoint(), window.location.origin)
+  url.searchParams.set('view', 'pending')
+  const report = await readResponse(await fetch(url, { cache: 'no-store' }))
+  return { ...report, rows: report.pendingRows ?? selectImportedPendingMedicalForms(report.rows) }
+}
+
+export async function reconcilePendingMedicalForms(medicalRows, striveRows) {
+  return readResponse(await fetch(getOrdersHistoryEndpoint(), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'reconcile-pending', medicalRows, striveRows }),
+  }))
+}
+
+export async function acceptPendingMedicalForm(rowId) {
+  return readResponse(await fetch(getOrdersHistoryEndpoint(), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'accept-pending', rowId }),
+  }))
+}
+
 export async function saveOrdersHistory(rows, reportDate, sourceFileName = '', options = {}) {
   const result = await readResponse(await fetch(getOrdersHistoryEndpoint(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows, reportDate, sourceFileName, ...options }),
+    body: JSON.stringify({ rows: rows.filter(isOrderHistoryEligible), reportDate, sourceFileName, ...options }),
   }))
   return result.rows
 }

@@ -4,6 +4,7 @@ import {
   buildOrderCsvLookup,
   buildStriveCsvLookup,
   enrichHubSpotOrders,
+  enrichPendingMedicalForms,
   enrichStriveOrderNumbers,
   expandHubSpotOrderItems,
   findMedicalFormOrderWarnings,
@@ -39,6 +40,44 @@ function order(overrides = {}) {
     ...overrides,
   }
 }
+
+test('finds a previous pending order in a later form upload without current orders', () => {
+  const pending = order({ reportDate: '2026-09-29', medicalForm: 'PENDING', doctorPrescribed: 'YES' })
+  const lookup = buildOrderCsvLookup([csvRow()])
+  const warnings = findMedicalFormOrderWarnings([], lookup, '2026-09-30', [pending])
+  assert.equal(warnings[0].reason, 'Found on pending')
+  const updated = enrichPendingMedicalForms([pending], lookup)
+  assert.equal(updated[0].medicalForm, 'YES')
+  assert.equal(updated[0].doctorPrescribed, 'YES')
+  assert.equal(updated[0].reportDate, '2026-09-29')
+  assert.equal(updated[0].pendingFormFound, true)
+  assert.equal(pending.medicalForm, 'PENDING')
+  const mismatch = buildOrderCsvLookup([csvRow({ purchase: 'Tirzepatide 24mg' })])
+  assert.deepEqual(enrichPendingMedicalForms([pending], mismatch), [])
+  assert.equal(findMedicalFormOrderWarnings([], mismatch, '2026-09-30', [pending])[0].reason, 'Patient not found')
+})
+
+test('shows the last matching historical purchase before form completion across report dates', () => {
+  const lookup = buildOrderCsvLookup([csvRow({ purchaseSurveyCompletionDate: '2026-11-07T00:15:00Z' })])
+  const history = [
+    order({ purchaseDate: '10/01/2026', reportDate: '2026-11-07' }),
+    order({ purchaseDate: '2026-11-06T00:00:00Z' }),
+    order({ purchaseDate: '11/08/2026' }),
+    order({ purchaseDate: '11/07/2026', treatment: 'Tirzepatide 24mg' }),
+    order({ purchaseDate: '11/07/2026', number: '1111111111', clientName: 'Someone Else' }),
+  ]
+  const warnings = findMedicalFormOrderWarnings([], lookup, '2026-11-07', [], history)
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0].reason, 'Found in historical data')
+  assert.equal(warnings[0].lastPurchaseDate, '2026-11-06')
+  assert.equal(warnings[0].completionDate, '2026-11-07T00:15:00Z')
+  const futureOnly = findMedicalFormOrderWarnings([], lookup, '2026-11-07', [], [history[2]])
+  assert.equal(futureOnly[0].reason, 'Patient not found')
+  assert.equal(futureOnly[0].lastPurchaseDate, '')
+  const pending = findMedicalFormOrderWarnings([], lookup, '2026-11-07', [history[0]], history)
+  assert.equal(pending[0].reason, 'Found on pending')
+  assert.equal(pending[0].lastPurchaseDate, '2026-11-06')
+})
 
 test('warns about Portal medical patients missing from the fetched date, using Portal names', () => {
   const lookup = buildOrderCsvLookup([

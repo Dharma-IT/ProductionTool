@@ -275,7 +275,15 @@ export function buildOrderCsvLookup(csvRows) {
   return { byPhone, byName, records, rowCount: csvRows.length }
 }
 
-export function findMedicalFormOrderWarnings(orders, lookup, reportDate) {
+function purchaseCalendarDate(order) {
+  const value = cleanCsvValue(order.purchaseDate || order.reportDate)
+  const slashDate = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slashDate) return `${slashDate[3]}-${slashDate[1].padStart(2, '0')}-${slashDate[2].padStart(2, '0')}`
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? '' : new Date(timestamp).toISOString().slice(0, 10)
+}
+
+export function findMedicalFormOrderWarnings(orders, lookup, reportDate, pendingOrders = [], historicalOrders = []) {
   const patientMatches = new Set()
   const itemMatches = new Set()
   orders.forEach((order) => {
@@ -295,13 +303,25 @@ export function findMedicalFormOrderWarnings(orders, lookup, reportDate) {
     const clientName = [record.firstName, record.lastName].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
     const identity = normalizePhone(record.phone) || normalizeName(clientName) || `row-${index}`
     const key = `${identity}|${record.purchase.toLowerCase().replace(/\s+/g, ' ')}`
+    const completionDate = Number.isNaN(Date.parse(record.purchaseSurveyCompletionDate)) ? ''
+      : new Date(record.purchaseSurveyCompletionDate).toISOString().slice(0, 10)
+    const matchingPurchases = (candidates) => candidates.filter((candidate) =>
+      findMatches(candidate, lookup).includes(record) && medicalProductMatches(candidate.treatment, record.purchase)
+      && (!purchaseCalendarDate(candidate) || !completionDate || purchaseCalendarDate(candidate) <= completionDate))
+    const pendingMatches = matchingPurchases(pendingOrders)
+    const historicalMatches = matchingPurchases(historicalOrders)
+    const lastPurchaseDate = [...pendingMatches, ...historicalMatches]
+      .map(purchaseCalendarDate).filter(Boolean).sort().at(-1) || ''
     const warning = {
       id: key,
       clientName,
       number: record.phone,
       treatment: record.purchase,
       completionDate: record.purchaseSurveyCompletionDate || '',
-      reason: patientMatches.has(record) ? 'Medication or dose not found' : 'Patient not found',
+      lastPurchaseDate,
+      reason: pendingMatches.length ? 'Found on pending'
+        : historicalMatches.length ? 'Found in historical data'
+          : patientMatches.has(record) ? 'Medication or dose not found' : 'Patient not found',
     }
     const existing = warnings.get(key)
     if (!existing || completionTime(record) > completionTime({ purchaseSurveyCompletionDate: existing.completionDate })) {
@@ -309,6 +329,16 @@ export function findMedicalFormOrderWarnings(orders, lookup, reportDate) {
     }
   })
   return [...warnings.values()]
+}
+
+export function enrichPendingMedicalForms(orders, lookup) {
+  return orders.flatMap((order) => {
+    const matches = findMatches(order, lookup).filter((record) => medicalProductMatches(order.treatment, record.purchase))
+    if (!matches.length) return []
+    const enriched = enrichHubSpotOrders([order], buildOrderCsvLookup(matches)).rows[0]
+    return [{ ...enriched, doctorPrescribed: order.doctorPrescribed ?? '',
+      pendingFormFound: true, pendingReviewedAt: new Date().toISOString() }]
+  })
 }
 
 function findMatches(order, lookup) {

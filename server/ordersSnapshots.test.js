@@ -24,6 +24,11 @@ test('CSV imports stay visible alongside snapshots and snapshot replacements', (
   }
 })
 
+test('pending medical form imports never appear in historical data', () => {
+  const pending = { id: 'pending', reportDate: '2026-10-01', treatment: 'Tirzepatide', recordType: 'pending-medical-form-import' }
+  assert.deepEqual(readOrdersSnapshot([pending]).rows, [])
+})
+
 test('saves and reloads complete dated reports, warnings, replacements, and history edits', async () => {
   const records = new Map()
   let failWrites = false
@@ -108,6 +113,43 @@ test('saves and reloads complete dated reports, warnings, replacements, and hist
     assert.equal(allReports.rows[0].reportDate, '2026-10-29')
     assert.equal(allReports.warnings[0].reportDate, '2026-10-28')
     assert.equal(allReports.reportCount, 2)
+
+    const workflowRows = [
+      { id: 'pending-new', clientName: 'Test Patient', number: '15551234567', treatment: 'Tirzepatide 52mg', medicalForm: 'PENDING' },
+      { id: 'ready-new', treatment: 'Semaglutide', medicalForm: 'YES' },
+      { id: 'matched-new', treatment: 'Sermorelin', medicalForm: 'PENDING', striveOrderNumber1: '123' },
+      { id: 'excluded-new', treatment: 'Subscription GLP-1 Support', medicalForm: 'PENDING' },
+    ]
+    response = await save({ rows: workflowRows, snapshot: true, workflowComplete: true, reportDate: '2026-11-06' })
+    assert.equal(response.status, 200)
+    report = await load('2026-11-06')
+    assert.deepEqual(report.rows.map((row) => row.id), ['2026-11-06:ready-new', '2026-11-06:matched-new'])
+    let pending = await (await fetch(`${apiUrl}/api/orders-history?view=pending`)).json()
+    assert.deepEqual(pending.rows.map((row) => row.id), ['2026-11-06:pending-new'])
+    response = await save({ action: 'accept-pending', rowId: '2026-11-06:pending-new' })
+    assert.equal(response.status, 409)
+    response = await save({ action: 'reconcile-pending', medicalRows: [{
+      firstName: 'Test', lastName: 'Patient', phone: '15551234567', purchase: 'Tirzepatide 52mg',
+      street: '10 Main Street', city: 'Newark', state: 'NJ', zip: '07105',
+      purchaseSurveyCompletionDate: '2026-11-07T12:00:00Z',
+    }] })
+    assert.equal(response.status, 200)
+    pending = await response.json()
+    assert.equal(pending.rows.length, 1)
+    assert.equal(pending.rows[0].medicalForm, 'YES')
+    assert.equal(pending.rows[0].address, '10 Main Street')
+    assert.equal((await load('2026-11-06')).rows.length, 2)
+    response = await save({ action: 'accept-pending', rowId: '2026-11-06:pending-new' })
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).rows.length, 0)
+    assert.equal((await load('2026-11-06')).rows.length, 3)
+    response = await save({ action: 'accept-pending', rowId: '2026-11-06:pending-new' })
+    assert.equal(response.status, 409)
+    await save({ rows: workflowRows.map((row) => row.id === 'pending-new' ? { ...row, medicalForm: 'YES' } : row),
+      snapshot: true, workflowComplete: true, reportDate: '2026-11-06' })
+    pending = await (await fetch(`${apiUrl}/api/orders-history?view=pending`)).json()
+    assert.equal(pending.rows.length, 0)
+    assert.equal((await load('2026-11-06')).rows.length, 3)
 
     failWrites = true
     response = await save({ rows: [], warnings: [], snapshot: true, reportDate: '2026-10-29' })

@@ -5,6 +5,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { productPriceCatalog } from './productPriceCatalog.js'
 import { buildOrdersSnapshot, readOrdersSnapshot } from './ordersSnapshots.js'
+import { isOrderHistoryEligible } from '../src/services/orderHistoryEligibility.js'
+import { selectImportedPendingMedicalForms } from '../src/services/pendingMedicalForms.js'
+import { buildOrderCsvLookup, buildStriveCsvLookup, enrichPendingMedicalForms, enrichStriveOrderNumbers } from '../src/services/orderCsvEnrichment.js'
 import {
   buildAircallDatabaseRow,
   fetchAircallCalls,
@@ -4037,6 +4040,11 @@ const server = createServer(async (request, response) => {
   if (requestUrl.pathname === '/api/orders-history' && request.method === 'GET') {
     try {
       const records = await loadOrdersHistoryRowsFromSupabase(requestUrl.searchParams.get('date'))
+      if (requestUrl.searchParams.get('view') === 'pending') {
+        sendJson(request, response, 200, { rows: selectImportedPendingMedicalForms(records),
+          updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
+        return
+      }
       sendJson(request, response, 200, { ...readOrdersSnapshot(records), updatedAt: new Date().toISOString() }, { 'Cache-Control': 'no-store' })
     } catch (error) {
       sendJson(request, response, 500, { message: error.message }, { 'Cache-Control': 'no-store' })
@@ -4047,7 +4055,33 @@ const server = createServer(async (request, response) => {
   if (requestUrl.pathname === '/api/orders-history' && request.method === 'POST') {
     try {
       const payload = await readJsonRequest(request)
-      const rows = Array.isArray(payload.rows) ? payload.rows : []
+      if (payload.action === 'reconcile-pending' || payload.action === 'accept-pending') {
+        const records = await loadOrdersHistoryRowsFromSupabase()
+        const pending = selectImportedPendingMedicalForms(records)
+        if (payload.action === 'reconcile-pending') {
+          if (!Array.isArray(payload.medicalRows)) {
+            sendJson(request, response, 400, { message: 'Expected uploaded medical form rows.' })
+            return
+          }
+          let updates = enrichPendingMedicalForms(pending, buildOrderCsvLookup(payload.medicalRows))
+          if (Array.isArray(payload.striveRows)) updates = enrichStriveOrderNumbers(updates, buildStriveCsvLookup(payload.striveRows)).rows
+          for (const row of updates) {
+            await upsertOrdersHistoryRowsToSupabase([{ ...row, recordType: 'pending-medical-review', pendingAccepted: false }], row.reportDate, row.sourceFileName)
+          }
+        } else {
+          const row = pending.find((item) => (item.rowId || item.id) === payload.rowId)
+          if (!row || !row.pendingFormFound || row.medicalForm !== 'YES' || !isOrderHistoryEligible(row)) {
+            sendJson(request, response, 409, { message: 'A matching medical form and complete address are required before accepting this pending order.' })
+            return
+          }
+          await upsertOrdersHistoryRowsToSupabase([{ ...row, recordType: 'pending-medical-review',
+            pendingAccepted: true, acceptedAt: new Date().toISOString() }], row.reportDate, row.sourceFileName)
+        }
+        const updated = await loadOrdersHistoryRowsFromSupabase()
+        sendJson(request, response, 200, { rows: selectImportedPendingMedicalForms(updated) }, { 'Cache-Control': 'no-store' })
+        return
+      }
+      const rows = Array.isArray(payload.rows) ? payload.rows.filter(isOrderHistoryEligible) : []
       const reportDate = String(payload.reportDate ?? '').trim()
       if ((!rows.length && !payload.snapshot) || !/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
         sendJson(request, response, 400, { message: 'Expected rows and a valid reportDate.' }, { 'Cache-Control': 'no-store' })
@@ -4055,15 +4089,16 @@ const server = createServer(async (request, response) => {
       }
       if (payload.snapshot) {
         const snapshot = buildOrdersSnapshot(rows, reportDate, payload.sourceFileName || '',
-          Array.isArray(payload.warnings) ? payload.warnings : [])
+          Array.isArray(payload.warnings) ? payload.warnings : [], payload.workflowComplete === true)
         await upsertOrdersHistoryRowsToSupabase([snapshot], reportDate, payload.sourceFileName)
       } else {
         const existing = readOrdersSnapshot(await loadOrdersHistoryRowsFromSupabase(reportDate))
         const importedById = new Map(existing.rows
-          .filter((row) => row.recordType === 'orders-csv-import')
+          .filter((row) => row.recordType === 'orders-csv-import' || row.recordType === 'pending-medical-review')
           .map((row) => [row.rowId || row.id, row]))
         const importedEdits = rows.filter((row) => importedById.has(row.rowId || row.id))
-          .map((row) => ({ ...importedById.get(row.rowId || row.id), ...row, recordType: 'orders-csv-import' }))
+          .map((row) => ({ ...importedById.get(row.rowId || row.id), ...row,
+            recordType: importedById.get(row.rowId || row.id).recordType }))
         await upsertOrdersHistoryRowsToSupabase(importedEdits, reportDate, payload.sourceFileName)
         const otherEdits = rows.filter((row) => !importedById.has(row.rowId || row.id))
         if (existing.snapshot) {
