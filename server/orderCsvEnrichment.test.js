@@ -7,6 +7,7 @@ import {
   enrichStriveOrderNumbers,
   expandHubSpotOrderItems,
   findMedicalFormOrderWarnings,
+  normalizeOrderStatuses,
   validateOrderCsvHeaders,
   validateStriveCsvHeaders,
 } from '../src/services/orderCsvEnrichment.js'
@@ -117,7 +118,7 @@ test('matches country-code phone numbers and separates address fields', () => {
       city: 'Newark',
       state: 'NJ',
       zipCode: '07105',
-      medicalForm: 'Yes',
+      medicalForm: 'YES',
       doctorPrescribed: '',
     },
   )
@@ -141,7 +142,7 @@ test('uses the Portal name after matching by phone and preserves item identity a
   assert.equal(result.rows[0].id, original.id)
   assert.equal(result.rows[0].number, original.number)
   assert.equal(result.rows[0].treatment, original.treatment)
-  assert.equal(result.rows[0].medicalForm, 'Yes')
+  assert.equal(result.rows[0].medicalForm, 'YES')
   assert.equal(original.clientName, 'Aurora Cux (2)')
 })
 
@@ -201,14 +202,14 @@ test('treats Tirzepatide 24mg and 30mg forms as equivalent', () => {
     order({ treatment: '1x Compounded Tirzepatide 24mg' }),
   ], lookup)
 
-  assert.equal(result.rows[0].medicalForm, 'Yes')
+  assert.equal(result.rows[0].medicalForm, 'YES')
 })
 
 test('requires other dosages to match exactly', () => {
   const matchingLookup = buildOrderCsvLookup([csvRow({ purchase: 'Personalized Tirzepatide+ 52mg' })])
   const mismatchingLookup = buildOrderCsvLookup([csvRow({ purchase: 'Personalized Tirzepatide+ 24mg' })])
 
-  assert.equal(enrichHubSpotOrders([order()], matchingLookup).rows[0].medicalForm, 'Yes')
+  assert.equal(enrichHubSpotOrders([order()], matchingLookup).rows[0].medicalForm, 'YES')
   assert.equal(enrichHubSpotOrders([order()], mismatchingLookup).rows[0].medicalForm, 'Mismatch')
 })
 
@@ -216,7 +217,7 @@ test('keeps a missing medical form pending instead of marking it as a mismatch',
   const lookup = buildOrderCsvLookup([csvRow({ purchase: 'Nutrition Consultation' })])
   const result = enrichHubSpotOrders([order()], lookup)
 
-  assert.equal(result.rows[0].medicalForm, 'Pending')
+  assert.equal(result.rows[0].medicalForm, 'PENDING')
 })
 
 test('treats matching Semaglutide as a medical product', () => {
@@ -225,7 +226,7 @@ test('treats matching Semaglutide as a medical product', () => {
     order({ treatment: '1x Compounded Semaglutide 1mg' }),
   ], lookup)
 
-  assert.equal(result.rows[0].medicalForm, 'Yes')
+  assert.equal(result.rows[0].medicalForm, 'YES')
   assert.equal(result.rows[0].doctorPrescribed, '')
 })
 
@@ -235,14 +236,14 @@ test('marks GHK-Cu pending until it is verified by the uploaded CSV', () => {
     order({ treatment: '1x GHK-Cu Troches - 3 Months' }),
   ], unmatchedLookup)
 
-  assert.equal(pendingResult.rows[0].medicalForm, 'Pending')
+  assert.equal(pendingResult.rows[0].medicalForm, 'PENDING')
 
   const verifiedLookup = buildOrderCsvLookup([csvRow({ purchase: 'GHK-Cu Troches (One Time / 90-Day Supply)' })])
   const verifiedResult = enrichHubSpotOrders([
     order({ treatment: '1x GHK-Cu Troches - 3 Months' }),
   ], verifiedLookup)
 
-  assert.equal(verifiedResult.rows[0].medicalForm, 'Yes')
+  assert.equal(verifiedResult.rows[0].medicalForm, 'YES')
 })
 
 test('leaves non-medical products blank and removes null-like address values', () => {
@@ -272,8 +273,8 @@ for (const [product, purchase] of [
 ]) {
   test(`verifies Subscription ${product} against its medical form`, () => {
     const input = order({ treatment: `1x Subscription ${product}`, purchaseDate: '2026-10-26' })
-    assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([])).rows[0].medicalForm, 'Pending')
-    assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([csvRow({ purchase })])).rows[0].medicalForm, 'Yes')
+    assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([])).rows[0].medicalForm, 'PENDING')
+    assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([csvRow({ purchase })])).rows[0].medicalForm, 'YES')
     assert.equal(enrichHubSpotOrders([input], buildOrderCsvLookup([
       csvRow({ purchase: 'Sermorelin 60-Day Supply' }),
     ])).rows[0].medicalForm, 'Mismatch')
@@ -284,7 +285,7 @@ test('excludes NAD+ capsules from medical checks and from qualifying subscriptio
   for (const product of ['NAD+ Capsules', 'Subscription NAD+ Capsules']) {
     const lookup = buildOrderCsvLookup([csvRow({ purchase: product })])
     assert.equal(enrichHubSpotOrders([order({ treatment: `1x ${product}` })], lookup).rows[0].medicalForm, '')
-    assert.equal(enrichHubSpotOrders([order({ treatment: '1x Subscription NAD+' })], lookup).rows[0].medicalForm, 'Pending')
+    assert.equal(enrichHubSpotOrders([order({ treatment: '1x Subscription NAD+' })], lookup).rows[0].medicalForm, 'PENDING')
   }
 })
 
@@ -386,4 +387,33 @@ test('routes Strive numbers into columns by order status', () => {
   assert.equal(result.rows[0].striveOrderNumber1, '100, 400')
   assert.equal(result.rows[0].striveOrderNumber2, '200')
   assert.equal(result.rows[0].futureOrderNumber, '300')
+})
+
+
+test('sets both prescription fields only for matched Strive orders with numbers', () => {
+  for (const status of ['Complete Processing', 'Completed Orders', 'On Hold', 'Future Orders']) {
+    const lookup = buildStriveCsvLookup([
+      { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '123', 'Order Status': status },
+    ])
+    const original = order({ doctorPrescribed: 'NO', prescribedPharmacy: 'PENDING' })
+    const result = enrichStriveOrderNumbers([original, order({ clientName: 'Other Patient' })], lookup)
+    assert.equal(result.rows[0].doctorPrescribed, 'YES')
+    assert.equal(result.rows[0].prescribedPharmacy, 'YES')
+    assert.equal(result.rows[1].doctorPrescribed, undefined)
+    assert.equal(original.doctorPrescribed, 'NO')
+  }
+  const lookup = buildStriveCsvLookup([
+    { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '', 'Order Status': 'On Hold' },
+  ])
+  assert.equal(enrichStriveOrderNumbers([order()], lookup).rows[0].doctorPrescribed, undefined)
+})
+
+test('capitalizes status values across order columns without changing other values', () => {
+  assert.deepEqual(normalizeOrderStatuses({
+    medicalForm: 'Yes', doctorPrescribed: 'no', prescribedPharmacy: 'pending',
+    addressConfirmed: ' yes ', proposedSecondOrder: 'No', notes: 'Pending review', state: 'NY',
+  }), {
+    medicalForm: 'YES', doctorPrescribed: 'NO', prescribedPharmacy: 'PENDING',
+    addressConfirmed: 'YES', proposedSecondOrder: 'NO', notes: 'Pending review', state: 'NY',
+  })
 })

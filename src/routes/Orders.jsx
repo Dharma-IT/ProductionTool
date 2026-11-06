@@ -10,6 +10,8 @@ import {
   enrichStriveOrderNumbers,
   expandHubSpotOrderItems,
   findMedicalFormOrderWarnings,
+  normalizeOrderStatus,
+  normalizeOrderStatuses,
   validateOrderCsvHeaders,
   validateStriveCsvHeaders,
 } from '../services/orderCsvEnrichment'
@@ -55,7 +57,7 @@ function todayIsoDate() {
 }
 
 function displayCell(row, key) {
-  const value = row[key]
+  const value = normalizeOrderStatus(row[key])
   if (!value) return ''
   if (key === 'language' && /^es(?:[-_]|$)/i.test(String(value).trim())) return 'Spanish'
   if (key !== 'purchaseDate') return value
@@ -103,7 +105,7 @@ function Orders() {
       : { rows: enrichment.rows, matchedCount: 0, unmatchedCount: 0, ambiguousCount: 0 },
     [enrichment, striveCsvLookup],
   )
-  const displayedRows = striveEnrichment.rows
+  const displayedRows = useMemo(() => striveEnrichment.rows.map(normalizeOrderStatuses), [striveEnrichment.rows])
   const medicalWarnings = useMemo(
     () => csvLookup ? findMedicalFormOrderWarnings(rows, csvLookup, request.date) : [],
     [rows, csvLookup, request.date],
@@ -262,7 +264,7 @@ function Orders() {
   function updateCell(rowId, key, value) {
     setCellEdits((current) => ({
       ...current,
-      [rowId]: { ...current[rowId], [key]: value },
+      [rowId]: { ...current[rowId], [key]: normalizeOrderStatus(value) },
     }))
   }
 
@@ -372,7 +374,7 @@ function Orders() {
 
     if (header.key === 'medicalForm' || header.key === 'doctorPrescribed') {
       const savedStatus = String(editableValue ?? '').trim()
-      const statuses = ['Yes', 'Pending', 'Mismatch', 'No']
+      const statuses = ['YES', 'PENDING', 'Mismatch', 'NO']
       const selectedStatus = statuses.find((value) => value.toLowerCase() === savedStatus.toLowerCase()) ?? savedStatus
       return (
         <select
@@ -383,10 +385,10 @@ function Orders() {
           onBlur={() => activeView === 'history' && saveHistoryRow(row)}
         >
           <option value="">{header.key === 'medicalForm' ? '' : 'Select'}</option>
-          <option value="Yes">Yes</option>
-          <option value="Pending">Pending</option>
+          <option value="YES">YES</option>
+          <option value="PENDING">PENDING</option>
           {(header.key === 'medicalForm' || selectedStatus === 'Mismatch') && <option value="Mismatch">Mismatch</option>}
-          <option value="No">No</option>
+          <option value="NO">NO</option>
           {selectedStatus && !statuses.includes(selectedStatus) && <option value={selectedStatus}>{selectedStatus}</option>}
         </select>
       )

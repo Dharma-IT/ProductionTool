@@ -7,6 +7,15 @@ export const requiredStriveCsvHeaders = ['First Name', 'Last Name', 'Medication'
 
 const nullLikeValues = new Set(['null', 'undefined'])
 
+export function normalizeOrderStatus(value) {
+  const status = String(value ?? '').trim().toUpperCase()
+  return ['YES', 'NO', 'PENDING'].includes(status) ? status : value
+}
+
+export function normalizeOrderStatuses(order) {
+  return Object.fromEntries(Object.entries(order).map(([key, value]) => [key, normalizeOrderStatus(value)]))
+}
+
 export function cleanCsvValue(value) {
   const cleaned = String(value ?? '').trim()
   return nullLikeValues.has(cleaned.toLowerCase()) ? '' : cleaned
@@ -191,6 +200,8 @@ export function enrichStriveOrderNumbers(orders, lookup) {
       matchedCount += 1
       return {
         ...order,
+        doctorPrescribed: 'YES',
+        prescribedPharmacy: 'YES',
         ...(categorizedNumbers.strive.length
           ? { striveOrderNumber1: categorizedNumbers.strive.join(', ') }
           : {}),
@@ -329,8 +340,8 @@ export function enrichHubSpotOrders(orders, lookup) {
     const hasSubmittedMedicalForm = matches.some((row) => medicalProducts(row.purchase).size > 0)
     const medicalStatus = hubSpotProducts.size > 0
       ? qualifyingMatch
-        ? hasCompleteAddress(address) ? 'Yes' : 'Pending'
-        : hasSubmittedMedicalForm ? 'Mismatch' : 'Pending'
+        ? hasCompleteAddress(address) ? 'YES' : 'PENDING'
+        : hasSubmittedMedicalForm ? 'Mismatch' : 'PENDING'
       : ''
 
     return {
