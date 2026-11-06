@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
 import { loadOrdersHistory, saveOrdersHistory } from '../services/ordersHistory'
 import { formatOrderPurchaseDate } from '../services/orderDates'
+import { formatOrderExportValue, getOrderExportHeaders } from '../services/orderExport'
 import {
   buildOrderCsvLookup,
   buildStriveCsvLookup,
@@ -285,13 +286,14 @@ function Orders() {
   function exportVisibleRows(format) {
     if (visibleRows.length === 0) return
 
+    const exportHeaders = getOrderExportHeaders(visibleHeaders)
     const exportRows = visibleRows.map((row) => Object.fromEntries(
-      visibleHeaders.map(({ key, label }) => [label, readEditableValue(row, key)]),
+      exportHeaders.map(({ key, label }) => [label, formatOrderExportValue(key, readEditableValue(row, key))]),
     ))
     const worksheet = XLSX.utils.json_to_sheet(exportRows, {
-      header: visibleHeaders.map(({ label }) => label),
+      header: exportHeaders.map(({ label }) => label),
     })
-    worksheet['!cols'] = visibleHeaders.map(({ label }) => ({
+    worksheet['!cols'] = exportHeaders.map(({ label }) => ({
       wch: Math.min(50, Math.max(label.length + 2, 14)),
     }))
 
