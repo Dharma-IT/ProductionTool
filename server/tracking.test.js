@@ -1,12 +1,36 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { countOpenDays, parseTrackingDate, getNormalizedTrackingStatus, getOrderWarningSummary } from '../src/services/trackingAnalytics.js'
-import { collectTrackingPages } from '../src/services/trackingPagination.js'
+import { collectTrackingPages, refreshTrackingPages } from '../src/services/trackingPagination.js'
 
 function aged(row) {
   const normalizedStatus = getNormalizedTrackingStatus(row.status)
   return { ...row, normalizedStatus, businessDaysOpen: normalizedStatus === 'delivered' ? 0 : countOpenDays(parseTrackingDate(row.date), new Date('2026-10-28T12:00:00Z')) }
 }
+
+test('shows stored shipments before live sync and rebuilds results after sync', async () => {
+  let synced = false
+  const previews = []
+  const result = await refreshTrackingPages({
+    loadPage: async () => ({ rows: synced ? [{ rowId: 'current', status: 'Delivered' }] : [{ rowId: 'old', status: 'In transit' }], hasMoreRows: false }),
+    onProgress: (report) => previews.push(report.rows),
+    refresh: async () => {
+      assert.equal(previews[0][0].rowId, 'old')
+      synced = true
+    },
+  })
+  assert.deepEqual(result.rows, [{ rowId: 'current', status: 'Delivered' }])
+})
+
+test('keeps stored preview available without declaring completion if live sync fails', async () => {
+  const previews = []
+  await assert.rejects(refreshTrackingPages({
+    loadPage: async () => ({ rows: [{ rowId: 'saved' }], hasMoreRows: false }),
+    onProgress: (report) => previews.push(report),
+    refresh: async () => { throw new Error('Shopify unavailable') },
+  }), /Shopify unavailable/)
+  assert.equal(previews[0].rows[0].rowId, 'saved')
+})
 
 test('counts the current business day, excludes weekends and the order date', () => {
   assert.equal(countOpenDays(parseTrackingDate('10/16/2026'), new Date('2026-10-28T12:00:00Z')), 8)

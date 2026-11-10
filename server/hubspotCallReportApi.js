@@ -1913,7 +1913,14 @@ async function buildShopifyTrackingReport(options = {}) {
   )
   const visibleOrders = orders.filter((order) => !isRefundedOrCancelledShopifyOrder(order))
   try {
-    await enrichShopifyShipments(orders, shopifyGraphql)
+    // Every order already has fresh REST fulfillment statuses. Only fetch the
+    // additional event/ETA details for open shipments eligible for risk.
+    const riskOrders = orders.filter((order) => {
+      const age = countCalendarDays(new Date(order.created_at))
+      return Number.isFinite(age) && age <= maxRiskAgeDays + 1
+        && (order.fulfillments ?? []).some((fulfillment) => fulfillment.shipment_status !== 'delivered')
+    })
+    await enrichShopifyShipments(riskOrders, shopifyGraphql)
   } catch (error) {
     if (options.forceRefresh) throw new Error(`Shopify shipment update failed: ${error.message}`, { cause: error })
     // Keep the base tracking report usable, and expose the missing enrichment.

@@ -1,4 +1,4 @@
-import { collectTrackingPages } from './trackingPagination'
+import { collectTrackingPages, refreshTrackingPages } from './trackingPagination'
 
 const sessionCacheKey = 'shopify-tracking-report:v7'
 const defaultRowsLimit = 1000
@@ -155,11 +155,25 @@ export async function loadShopifyTracking(options = {}) {
 
 export async function loadAllShopifyTracking(options = {}) {
   if (!import.meta.env.VITE_SHOPIFY_TRACKING_URL) throw new Error('Tracking endpoint is not configured')
-  if (options.forceRefresh !== false) {
-    const refreshed = await loadShopifyTracking({ forceRefresh: true, signal: options.signal })
-    if (refreshed.databaseError) throw new Error(`Live sync failed: ${refreshed.databaseError}`)
-  }
-  return collectTrackingPages((rowsOffset) => loadShopifyTracking({
+  const loadPage = (rowsOffset) => loadShopifyTracking({
     stored: true, skipSessionCache: true, rowsLimit: 1000, rowsOffset, signal: options.signal,
-  }), options)
+  })
+  if (options.forceRefresh === false) return collectTrackingPages(loadPage, options)
+  return refreshTrackingPages({
+    ...options, loadPage,
+    refresh: async () => {
+      const timeout = AbortSignal.timeout(90000)
+      const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
+      let refreshed
+      try {
+        refreshed = await loadShopifyTracking({ forceRefresh: true, signal })
+      } catch (error) {
+        if (timeout.aborted && !options.signal?.aborted) {
+          throw new Error('Live Shopify sync timed out. Saved shipments are shown; delivery risks are not verified. Refresh to retry.', { cause: error })
+        }
+        throw error
+      }
+      if (refreshed.databaseError) throw new Error(`Live sync failed: ${refreshed.databaseError}`)
+    },
+  })
 }

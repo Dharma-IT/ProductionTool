@@ -271,14 +271,14 @@ function Tracking() {
             {complete
               ? `Shopify updates checked. All ${report.rows.length.toLocaleString()} records scanned. Risk totals cover every page.`
               : status === 'error'
-                ? 'Live shipment updates could not be verified. Refresh to retry.'
-                : `Checking live Shopify shipment updates, then scanning all records. ${report.rows.length.toLocaleString()} records loaded.`}
+                ? 'Saved shipments are shown below. Live delivery risks could not be verified; refresh to retry.'
+                : `Loading saved shipments and checking live Shopify updates. ${report.rows.length.toLocaleString()} records loaded. Delivery risks appear after verification.`}
           </span>
         </div>
       </div>
 
       {activeError && <div className="report-alert">{activeError}</div>}
-      {report.rows.length > 0 && (
+      {report.rows.length > 0 && complete && (
         <section className="tracking-analytics" aria-label="Tracking analytics">
           <div className="tracking-analytics-hero">
             <div>

@@ -1,3 +1,11 @@
+export async function refreshTrackingPages({ loadPage, refresh, signal, onProgress }) {
+  await collectTrackingPages(loadPage, { signal, onProgress })
+  await refresh()
+  signal?.throwIfAborted()
+  // Rescan from scratch: refunds/removals must not survive from the preview.
+  return collectTrackingPages(loadPage, { signal, onProgress })
+}
+
 // Completion is only reported after the final batch succeeds.
 export async function collectTrackingPages(loadPage, { signal, onProgress } = {}) {
   const rows = new Map()
