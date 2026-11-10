@@ -1,4 +1,4 @@
-import { countCalendarDays, getNormalizedTrackingStatus, isDeliveryRiskExcluded, maxRiskAgeDays, overdueDaysThreshold, reconcileDeliveredShipments } from '../src/services/trackingAnalytics.js'
+import { countCalendarDays, getNormalizedTrackingStatus, getTrackingScanCreatedAtMin, isTrackingRiskDate, isDeliveryRiskExcluded, maxRiskAgeDays, overdueDaysThreshold, reconcileDeliveredShipments } from '../src/services/trackingAnalytics.js'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -1862,8 +1862,12 @@ async function loadShopifyOrders(firstPageParams, { fullScan = false } = {}) {
       : firstPageParams
     const { payload, nextPageInfo } = await shopifyFetch('/orders.json', params)
 
-    orders.push(...(payload.orders ?? []))
-    pageInfo = nextPageInfo ?? ''
+    const pageOrders = payload.orders ?? []
+    const cutoff = firstPageParams.created_at_min ? Date.parse(firstPageParams.created_at_min) : null
+    // Orders are newest first, so there is no need to fetch past the cutoff.
+    const boundary = cutoff === null ? -1 : pageOrders.findIndex((order) => Date.parse(order.created_at) < cutoff)
+    orders.push(...(boundary < 0 ? pageOrders : pageOrders.slice(0, boundary)))
+    pageInfo = boundary < 0 ? (nextPageInfo ?? '') : ''
     pageCount += 1
   } while (pageInfo && pageCount < maxPages)
 
@@ -1879,7 +1883,7 @@ async function buildShopifyTrackingReport(options = {}) {
   const rowsLimit = readTrackingRowsLimit(options.rowsLimit)
   const rowsOffset = readTrackingRowsOffset(options.rowsOffset)
   const pageLimit = Math.min(Math.max(Number(limit) || 250, 1), 250)
-  const createdAtMin = options.forceRefresh ? undefined : process.env.SHOPIFY_TRACKING_CREATED_AT_MIN
+  const createdAtMin = getTrackingScanCreatedAtMin()
   const fields = [
     'id',
     'name',
@@ -1916,8 +1920,7 @@ async function buildShopifyTrackingReport(options = {}) {
     // Every order already has fresh REST fulfillment statuses. Only fetch the
     // additional event/ETA details for open shipments eligible for risk.
     const riskOrders = orders.filter((order) => {
-      const age = countCalendarDays(new Date(order.created_at))
-      return Number.isFinite(age) && age <= maxRiskAgeDays + 1
+      return isTrackingRiskDate(formatShopifyDate(order.created_at))
         && (order.fulfillments ?? []).some((fulfillment) => fulfillment.shipment_status !== 'delivered')
     })
     await enrichShopifyShipments(riskOrders, shopifyGraphql)
@@ -1939,7 +1942,7 @@ async function buildShopifyTrackingReport(options = {}) {
     .map((row) => applyDetoxTeaShippingConfirmationStatus(row))
     .map((row) => applyManualDeliveredStatus(row))
   const uspsTrackingNumbers = rowsWithDetoxTeaShippingConfirmationStatus
-    .filter((row) => !isDeliveredStatus(row.status))
+    .filter((row) => !isDeliveredStatus(row.status) && isTrackingRiskDate(row.date) && !isDeliveryRiskExcluded(row))
     .flatMap((row) => String(row.tracking ?? '').split(','))
   let uspsTrackingLookup = new Map()
   let uspsTrackingError = ''
@@ -4297,7 +4300,8 @@ const server = createServer(async (request, response) => {
         const limit = readTrackingRowsLimit(requestUrl.searchParams.get('rowsLimit') ?? '1000')
         const offset = readTrackingRowsOffset(requestUrl.searchParams.get('rowsOffset') ?? '0')
         const params = new URLSearchParams({
-          select: '*', order: 'order_sort.desc,row_id.asc',
+          select: '*', order: 'order_date.desc,row_id.asc',
+          order_date: `gte.${getTrackingScanCreatedAtMin().slice(0, 10)}`,
           limit: String(limit), offset: String(offset),
         })
         const storedRows = await supabaseRequest(`/${supabaseTrackingTable}?${params}`)

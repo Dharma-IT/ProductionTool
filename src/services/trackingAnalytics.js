@@ -41,6 +41,20 @@ export function countCalendarDays(startDate, endDate = getTrackingBusinessToday(
   return Math.floor((end - start) / 86400000)
 }
 
+export function isTrackingRiskDate(date, today = getTrackingBusinessToday()) {
+  const parsed = parseTrackingDate(date)
+  if (!parsed) return false
+  const age = countCalendarDays(parsed, today)
+  return age >= 0 && age <= maxRiskAgeDays
+}
+
+export function getTrackingScanCreatedAtMin(now = new Date()) {
+  const cutoff = getTrackingBusinessToday(now)
+  cutoff.setUTCDate(cutoff.getUTCDate() - maxRiskAgeDays)
+  cutoff.setUTCHours(0, 0, 0, 0)
+  return cutoff.toISOString()
+}
+
 export function countOpenDays(startDate, endDate = getTrackingBusinessToday()) {
   if (!startDate) return 0
 
@@ -140,7 +154,7 @@ export function getOrderWarningSummary(rows, today = getTrackingBusinessToday())
     }
 
     const withinRiskWindow = !isDeliveryRiskExcluded(row)
-      && countCalendarDays(parseTrackingDate(row.date), today) <= maxRiskAgeDays
+      && isTrackingRiskDate(row.date, today)
     nextOrder.failed = nextOrder.failed || (withinRiskWindow && row.normalizedStatus === 'failed')
     nextOrder.overdue = nextOrder.overdue
       || (withinRiskWindow && row.normalizedStatus !== 'delivered' && (

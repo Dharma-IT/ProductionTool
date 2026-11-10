@@ -269,7 +269,7 @@ function Tracking() {
           <strong>{complete ? 'Scan complete' : status === 'error' ? 'Scan incomplete' : 'Still scanning…'}</strong>
           <span className="tracking-scan-description">
             {complete
-              ? `Shopify updates checked. All ${report.rows.length.toLocaleString()} records scanned. Risk totals cover every page.`
+              ? `Shopify updates checked. All ${report.rows.length.toLocaleString()} records from the last 30 days loaded.`
               : status === 'error'
                 ? 'Saved shipments are shown below. Live delivery risks could not be verified; refresh to retry.'
                 : `Loading saved shipments and checking live Shopify updates. ${report.rows.length.toLocaleString()} records loaded. Delivery risks appear after verification.`}

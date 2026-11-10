@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { countOpenDays, parseTrackingDate, getNormalizedTrackingStatus, getOrderWarningSummary } from '../src/services/trackingAnalytics.js'
+import { countOpenDays, parseTrackingDate, getNormalizedTrackingStatus, getOrderWarningSummary, isTrackingRiskDate, getTrackingScanCreatedAtMin } from '../src/services/trackingAnalytics.js'
 import { collectTrackingPages, refreshTrackingPages } from '../src/services/trackingPagination.js'
 
 function aged(row) {
   const normalizedStatus = getNormalizedTrackingStatus(row.status)
   return { ...row, normalizedStatus, businessDaysOpen: normalizedStatus === 'delivered' ? 0 : countOpenDays(parseTrackingDate(row.date), new Date('2026-10-28T12:00:00Z')) }
 }
+
+test('live checks use the same 30-day cutoff as risk warnings', () => {
+  const now = new Date('2026-11-11T12:00:00Z')
+  assert.equal(getTrackingScanCreatedAtMin(now), '2026-10-12T00:00:00.000Z')
+  assert.equal(isTrackingRiskDate('10/12/2026', now), true)
+  assert.equal(isTrackingRiskDate('10/11/2026', now), false)
+  assert.equal(isTrackingRiskDate('', now), false)
+  assert.equal(isTrackingRiskDate('11/12/2026', now), false)
+})
 
 test('shows stored shipments before live sync and rebuilds results after sync', async () => {
   let synced = false
