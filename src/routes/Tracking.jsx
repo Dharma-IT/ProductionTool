@@ -233,7 +233,7 @@ function Tracking() {
 
       <div className="report-filters" aria-label="Tracking actions">
         <span className="filter-label">{getTrackingSourceLabel(activeReport.source)}</span>
-        <span className="timezone-pill">{activeReport.uspsTrackingEnabled ? 'USPS live enabled' : 'USPS links only'}</span>
+        <span className="timezone-pill">Shopify status</span>
         <button
           className="filter-button"
           disabled={activeStatus === 'loading'}
