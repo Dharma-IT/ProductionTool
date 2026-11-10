@@ -13,11 +13,13 @@ export async function enrichShopifyShipments(orders, graphql, checkedAt = new Da
     }`, { ids })
     if (result.errors?.length) throw new Error(result.errors.map((error) => error.message).join('; '))
     if (!Array.isArray(result.data?.nodes)) throw new Error('Shopify shipment details response is incomplete')
+    const returnedIds = new Set(result.data.nodes.filter(Boolean).map((node) => node.id))
+    if (ids.some((id) => !returnedIds.has(id))) throw new Error('Shopify shipment details are missing one or more fulfillments')
     for (const node of result.data.nodes.filter(Boolean)) {
       const event = node.events?.nodes?.[0]
       details.set(node.id, {
         fulfillmentId: node.id,
-        status: node.displayStatus,
+        status: event?.status === 'DELIVERED' ? 'DELIVERED' : node.displayStatus,
         estimatedDeliveryAt: node.estimatedDeliveryAt ?? '',
         inTransitAt: node.inTransitAt ?? '',
         deliveredAt: node.deliveredAt ?? '',

@@ -18,7 +18,6 @@ const trackingHeaders = [
   'Shipment updates',
 ]
 const trackingRowsPageSize = 100
-const trackingAutoRefreshMs = 5 * 60 * 1000
 
 const trackingExportFields = [
   ['Order Number', 'orderNumber'],
@@ -135,17 +134,8 @@ function Tracking() {
       }
     }
     load(refreshRequest.live)
-    const interval = window.setInterval(() => load(true), trackingAutoRefreshMs)
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') load(true)
-    }
-    window.addEventListener('focus', refreshWhenVisible)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
       controller.abort()
-      window.clearInterval(interval)
-      window.removeEventListener('focus', refreshWhenVisible)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [refreshRequest])
 
@@ -279,8 +269,10 @@ function Tracking() {
           <strong>{complete ? 'Scan complete' : status === 'error' ? 'Scan incomplete' : 'Still scanning…'}</strong>
           <span className="tracking-scan-description">
             {complete
-              ? `All ${report.rows.length.toLocaleString()} records checked. Risk totals cover every page.`
-              : `${report.rows.length.toLocaleString()} records loaded. Risk totals and search results are partial until the scan completes.`}
+              ? `Shopify updates checked. All ${report.rows.length.toLocaleString()} records scanned. Risk totals cover every page.`
+              : status === 'error'
+                ? 'Live shipment updates could not be verified. Refresh to retry.'
+                : `Checking live Shopify shipment updates, then scanning all records. ${report.rows.length.toLocaleString()} records loaded.`}
           </span>
         </div>
       </div>

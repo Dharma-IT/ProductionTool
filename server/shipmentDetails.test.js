@@ -39,3 +39,16 @@ test('carrier delay warns before the age threshold without flagging delivered ro
   assert.deepEqual(summary.overdueOrders.map((r) => r.orderNumber), ['#late'])
   assert.equal(summary.overdueOrders[0].status, 'In transit')
 })
+
+test('a Shopify delivered event overrides stale fulfillment display status', async () => {
+  const orders = [{ fulfillments: [{ id: 7045, shipment_status: 'in_transit' }] }]
+  await enrichShopifyShipments(orders, async (_, { ids }) => ({ data: { nodes: [{
+    id: ids[0], displayStatus: 'IN_TRANSIT', events: { nodes: [{ status: 'DELIVERED' }] },
+  }] } }))
+  assert.equal(orders[0].fulfillments[0].shipment_status, 'delivered')
+})
+
+test('missing Shopify fulfillment results cannot count as a successful update', async () => {
+  await assert.rejects(enrichShopifyShipments([{ fulfillments: [{ id: 7045 }] }],
+    async () => ({ data: { nodes: [null] } })), /missing one or more fulfillments/)
+})

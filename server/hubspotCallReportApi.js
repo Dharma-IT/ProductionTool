@@ -1850,11 +1850,11 @@ function applyUspsStatus(row, uspsTrackingLookup) {
   }
 }
 
-async function loadShopifyOrders(firstPageParams) {
+async function loadShopifyOrders(firstPageParams, { fullScan = false } = {}) {
   const orders = []
   let pageInfo = ''
   let pageCount = 0
-  const maxPages = Number(process.env.SHOPIFY_TRACKING_MAX_PAGES ?? 40)
+  const maxPages = fullScan ? Infinity : Number(process.env.SHOPIFY_TRACKING_MAX_PAGES ?? 40)
 
   do {
     const params = pageInfo
@@ -1879,7 +1879,7 @@ async function buildShopifyTrackingReport(options = {}) {
   const rowsLimit = readTrackingRowsLimit(options.rowsLimit)
   const rowsOffset = readTrackingRowsOffset(options.rowsOffset)
   const pageLimit = Math.min(Math.max(Number(limit) || 250, 1), 250)
-  const createdAtMin = process.env.SHOPIFY_TRACKING_CREATED_AT_MIN
+  const createdAtMin = options.forceRefresh ? undefined : process.env.SHOPIFY_TRACKING_CREATED_AT_MIN
   const fields = [
     'id',
     'name',
@@ -1904,7 +1904,7 @@ async function buildShopifyTrackingReport(options = {}) {
     order: 'created_at desc',
     created_at_min: createdAtMin,
     fields,
-  })
+  }, { fullScan: options.forceRefresh })
   const hiddenOrderNumbers = new Set(
     orders
       .filter(isRefundedOrCancelledShopifyOrder)
@@ -1915,6 +1915,7 @@ async function buildShopifyTrackingReport(options = {}) {
   try {
     await enrichShopifyShipments(orders, shopifyGraphql)
   } catch (error) {
+    if (options.forceRefresh) throw new Error(`Shopify shipment update failed: ${error.message}`, { cause: error })
     // Keep the base tracking report usable, and expose the missing enrichment.
     orders.forEach((order) => { order.shipmentDetailsError = error.message })
   }
@@ -1939,6 +1940,7 @@ async function buildShopifyTrackingReport(options = {}) {
   try {
     uspsTrackingLookup = await loadUspsTrackingStatuses(uspsTrackingNumbers, { forceRefresh: options.forceRefresh })
   } catch (error) {
+    if (options.forceRefresh) throw new Error(`USPS shipment update failed: ${error.message}`, { cause: error })
     uspsTrackingError = error.message
   }
   const rowsWithStatuses = reconcileDeliveredShipments(
