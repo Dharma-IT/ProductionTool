@@ -1,5 +1,10 @@
+export function isShipmentDelivered(shipment) {
+  return Boolean(shipment.deliveredAt)
+    || String(shipment.status ?? '').trim().toUpperCase() === 'DELIVERED'
+}
+
 export function isShipmentLate(shipment, now = new Date()) {
-  if (shipment.deliveredAt || shipment.status === 'DELIVERED') return false
+  if (isShipmentDelivered(shipment)) return false
   if (shipment.status === 'DELAYED' || /arriving late|delayed/i.test(shipment.latestMessage ?? '')) return true
   if (!shipment.estimatedDeliveryAt) return false
   // An estimate remains valid through its calendar day in the shipment's timezone.

@@ -1501,7 +1501,7 @@ function parseModernUspsTrackingRecord(record) {
   }
 }
 
-async function loadUspsTrackingStatuses(trackingNumbers) {
+async function loadUspsTrackingStatuses(trackingNumbers, { forceRefresh = false } = {}) {
   const consumerKey = process.env.USPS_CONSUMER_KEY
   const consumerSecret = process.env.USPS_CONSUMER_SECRET
   const enabled = process.env.USPS_TRACKING_ENABLED !== '0'
@@ -1517,7 +1517,7 @@ async function loadUspsTrackingStatuses(trackingNumbers) {
   normalizedTrackingNumbers.forEach((trackingNumber) => {
     const cachedStatus = uspsTrackingCache.get(trackingNumber)
 
-    if (cachedStatus && Date.now() - cachedStatus.cachedAt < uspsTrackingCacheTtlMs) {
+    if (!forceRefresh && cachedStatus && Date.now() - cachedStatus.cachedAt < uspsTrackingCacheTtlMs) {
       lookup.set(trackingNumber, cachedStatus.payload)
       return
     }
@@ -1726,6 +1726,8 @@ function normalizeShopifyOrder(order) {
 
   return {
     rowId: String(order.id),
+    financialStatus: order.financial_status ?? '',
+    cancelledAt: order.cancelled_at ?? '',
     shipmentDetails: fulfillments.map((f) => f.shipmentDetails).filter(Boolean),
     shipmentDetailsError: order.shipmentDetailsError ?? '',
     orderNumber: order.name ?? String(order.order_number ?? order.id),
@@ -1751,6 +1753,8 @@ function normalizeShopifyOrderLine(order, lineItem, lineItemIndex) {
 
   return {
     rowId: `${order.id}:${lineItem.id ?? lineItemIndex}`,
+    financialStatus: order.financial_status ?? '',
+    cancelledAt: order.cancelled_at ?? '',
     shipmentDetails: fulfillments.map((f) => f.shipmentDetails).filter(Boolean),
     shipmentDetailsError: order.shipmentDetailsError ?? '',
     orderNumber: order.name ?? String(order.order_number ?? order.id),
@@ -1909,10 +1913,10 @@ async function buildShopifyTrackingReport(options = {}) {
   )
   const visibleOrders = orders.filter((order) => !isRefundedOrCancelledShopifyOrder(order))
   try {
-    await enrichShopifyShipments(visibleOrders, shopifyGraphql)
+    await enrichShopifyShipments(orders, shopifyGraphql)
   } catch (error) {
     // Keep the base tracking report usable, and expose the missing enrichment.
-    visibleOrders.forEach((order) => { order.shipmentDetailsError = error.message })
+    orders.forEach((order) => { order.shipmentDetailsError = error.message })
   }
   const rows = filterExcludedTrackingOrders(visibleOrders.flatMap((order) => {
     const lineItems = order.line_items ?? []
@@ -1921,7 +1925,7 @@ async function buildShopifyTrackingReport(options = {}) {
       ? lineItems.map((lineItem, index) => normalizeShopifyOrderLine(order, lineItem, index))
       : [normalizeShopifyOrder(order)]
   }))
-  const sheetStatusLookup = await loadSheetStatusLookup()
+  const sheetStatusLookup = await loadSheetStatusLookup(options.forceRefresh)
   const rowsWithSheetStatus = rows.map((row) => applySheetStatus(row, sheetStatusLookup))
   const rowsWithDetoxTeaShippingConfirmationStatus = rowsWithSheetStatus
     .map((row) => applyDetoxTeaShippingConfirmationStatus(row))
@@ -1933,7 +1937,7 @@ async function buildShopifyTrackingReport(options = {}) {
   let uspsTrackingError = ''
 
   try {
-    uspsTrackingLookup = await loadUspsTrackingStatuses(uspsTrackingNumbers)
+    uspsTrackingLookup = await loadUspsTrackingStatuses(uspsTrackingNumbers, { forceRefresh: options.forceRefresh })
   } catch (error) {
     uspsTrackingError = error.message
   }
@@ -1951,7 +1955,14 @@ async function buildShopifyTrackingReport(options = {}) {
   const updatedAt = new Date().toISOString()
 
   try {
-    databaseSynced = await upsertTrackingRowsToSupabase(rowsWithStatuses, updatedAt)
+    // Persist excluded orders too: otherwise their old active records survive
+    // the sync and reappear when the client scans stored pages.
+    const hiddenRows = orders.filter(isRefundedOrCancelledShopifyOrder).flatMap((order) =>
+      order.line_items?.length
+        ? order.line_items.map((item, index) => normalizeShopifyOrderLine(order, item, index))
+        : [normalizeShopifyOrder(order)],
+    )
+    databaseSynced = await upsertTrackingRowsToSupabase([...rowsWithStatuses, ...hiddenRows], updatedAt)
     const databasePage = databaseSynced
       ? await loadTrackingRowsFromSupabase({
         limit: rowsLimit,
@@ -4283,6 +4294,9 @@ const server = createServer(async (request, response) => {
         const storedRows = await supabaseRequest(`/${supabaseTrackingTable}?${params}`)
         if (!Array.isArray(storedRows)) throw new Error('Invalid tracking records response')
         const rows = filterExcludedTrackingOrders(storedRows).map(normalizeTrackingDatabaseRow)
+          .filter((row) => !isRefundedOrCancelledShopifyOrder({
+            financial_status: row.financialStatus, cancelled_at: row.cancelledAt,
+          }))
         sendJson(request, response, 200, {
           source: 'supabase', rows, rowsLimit: limit, rowsOffset: offset,
           nextRowsOffset: offset + storedRows.length,
@@ -4324,6 +4338,7 @@ const server = createServer(async (request, response) => {
 
     if (!trackingPromise) {
       trackingPromise = buildShopifyTrackingReport({
+        forceRefresh,
         shopifyLimit: limit,
         rowsLimit,
         rowsOffset,

@@ -96,7 +96,9 @@ function Tracking() {
   const [search, setSearch] = useState('')
   const [pageIndex, setPageIndex] = useState(0)
   const [refreshRequest, setRefreshRequest] = useState({ live: true, version: 0 })
-  const activeReport = report
+  const activeReport = useMemo(() => ({
+    ...report, rows: reconcileDeliveredShipments(report.rows),
+  }), [report])
   const activeStatus = status
   const activeError = error
 
@@ -108,6 +110,7 @@ function Tracking() {
       running = true
       setStatus('loading')
       setComplete(false)
+      setReport((current) => ({ ...current, rows: [] }))
       setError('')
       try {
         const data = await loadAllShopifyTracking({
@@ -133,9 +136,16 @@ function Tracking() {
     }
     load(refreshRequest.live)
     const interval = window.setInterval(() => load(true), trackingAutoRefreshMs)
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') load(true)
+    }
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
       controller.abort()
       window.clearInterval(interval)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [refreshRequest])
 
@@ -145,10 +155,10 @@ function Tracking() {
 
   const matchingRows = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return report.rows.filter((row) => !query || JSON.stringify(row.shipmentDetails ?? []).toLowerCase().includes(query) || trackingExportFields.some(([, field]) =>
+    return activeReport.rows.filter((row) => !query || JSON.stringify(row.shipmentDetails ?? []).toLowerCase().includes(query) || trackingExportFields.some(([, field]) =>
       String(row[field] ?? '').toLowerCase().includes(query),
     ))
-  }, [report.rows, search])
+  }, [activeReport.rows, search])
   const pageCount = Math.max(1, Math.ceil(matchingRows.length / trackingRowsPageSize))
   const currentPage = Math.min(pageIndex, pageCount - 1)
   const visibleRows = matchingRows.slice(currentPage * trackingRowsPageSize, (currentPage + 1) * trackingRowsPageSize)

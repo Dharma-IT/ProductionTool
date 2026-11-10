@@ -121,6 +121,41 @@ test('partial deliveries keep warnings for outstanding packages with tracking', 
   assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#partial', '#untracked-partial'])
 })
 
+test('Shopify delivery evidence clears stale transit and failed risks, including #9513', () => {
+  for (const status of ['In transit', 'Failed delivery']) {
+    const summary = getOrderWarningSummary([
+      { ...aged({ orderNumber: '#9513', date: '11/02/2026', status }), businessDaysOpen: 9,
+        shipmentDetails: [{ status: 'DELIVERED', deliveredAt: '2026-11-07T12:00:00Z', latestMessage: 'Arriving Late' }] },
+    ], new Date('2026-11-11T12:00:00Z'))
+    assert.equal(summary.warningOrders.length, 0)
+    assert.equal(summary.activeOrders.length, 0)
+  }
+})
+
+test('delivery evidence for only part of a row does not clear outstanding shipment risk', () => {
+  const summary = getOrderWarningSummary([
+    { ...aged({ orderNumber: '#partial-details', date: '11/02/2026', status: 'In transit' }), businessDaysOpen: 9,
+      shipmentDetails: [{ status: 'DELIVERED' }, { status: 'IN_TRANSIT' }] },
+  ], new Date('2026-11-11T12:00:00Z'))
+  assert.equal(summary.warningOrders.length, 1)
+})
+
+test('delivered status or date always overrides stale risk fields and late messages', () => {
+  const rows = [
+    { status: 'Delivered', normalizedStatus: 'failed' },
+    { status: 'In transit', normalizedStatus: 'transit', deliveryDate: '11/07/2026' },
+    { status: 'Failed delivery', normalizedStatus: 'failed', shipmentDetails: [{ status: 'delivered', latestMessage: 'Arriving Late' }] },
+  ].map((row, index) => ({
+    date: '11/02/2026', businessDaysOpen: 20, orderNumber: `#delivered-${index}`,
+    shipmentDetails: [{ latestMessage: 'Arriving Late' }], ...row,
+  }))
+  const summary = getOrderWarningSummary(rows, new Date('2026-11-11T12:00:00Z'))
+  assert.equal(summary.overdueOrders.length, 0)
+  assert.equal(summary.failedOrders.length, 0)
+  assert.equal(summary.warningOrders.length, 0)
+  assert.equal(summary.activeOrders.length, 0)
+})
+
 test('explicitly excluded orders stay out of risk even without tracking', () => {
   const orderNumbers = ['#7201', '#7189', '#7422', '#7421', '#7412', '#7296', '#7285', '#7424']
   const rows = orderNumbers.map(orderNumber => aged({ orderNumber, date: '10/16/2026', status: 'In progress' }))

@@ -155,7 +155,7 @@ export async function loadShopifyTracking(options = {}) {
 
 export async function loadAllShopifyTracking(options = {}) {
   if (!import.meta.env.VITE_SHOPIFY_TRACKING_URL) throw new Error('Tracking endpoint is not configured')
-  if (options.forceRefresh) {
+  if (options.forceRefresh !== false) {
     const refreshed = await loadShopifyTracking({ forceRefresh: true, signal: options.signal })
     if (refreshed.databaseError) throw new Error(`Live sync failed: ${refreshed.databaseError}`)
   }

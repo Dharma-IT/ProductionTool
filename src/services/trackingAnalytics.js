@@ -1,4 +1,4 @@
-import { isShipmentLate } from './shipmentDetails.js'
+import { isShipmentDelivered, isShipmentLate } from './shipmentDetails.js'
 
 export const overdueDaysThreshold = 7
 export const maxRiskAgeDays = 30
@@ -84,6 +84,20 @@ export function isDeliveryRiskExcluded(row) {
 
 // Delivery evidence applies to a package, not every package in the order.
 export function reconcileDeliveredShipments(rows) {
+  rows = rows.map((row) => {
+    const shipments = row.shipmentDetails ?? []
+    const delivered = getNormalizedTrackingStatus(row.status) === 'delivered'
+      || Boolean(row.deliveryDate)
+      || (!row.shipmentDetailsError && shipments.length > 0 && shipments.every(isShipmentDelivered))
+    if (!delivered) return { ...row, normalizedStatus: getNormalizedTrackingStatus(row.status) }
+    return {
+      ...row,
+      status: 'Delivered',
+      normalizedStatus: 'delivered',
+      statusSource: row.statusSource || (shipments.length ? 'shopify' : ''),
+      businessDaysOpen: 0,
+    }
+  })
   const trackingKeys = (row) => String(row.tracking ?? '').split(',')
     .map((value) => value.replace(/\s/g, '').toUpperCase()).filter(Boolean)
     .map((value) => `${getTrackingOrderKey(row)}|${value}`)
