@@ -3,7 +3,7 @@ import { isShipmentDelivered, isShipmentLate } from './shipmentDetails.js'
 export const overdueDaysThreshold = 7
 export const maxRiskAgeDays = 30
 const deliveryRiskExcludedOrders = new Set([
-  '7424', '7201', '7189', '7422', '7421', '7412', '7296', '7285',
+  '7424', '7201', '7189', '7422', '7421', '7412', '7296', '7285', '7486',
 ])
 const trackingBusinessTimeZone = 'America/New_York'
 const trackingBusinessDateFormatter = new Intl.DateTimeFormat('en-US', {
