@@ -170,7 +170,7 @@ export function buildStriveCsvLookup(csvRows) {
     }
     const destination = orderStatus === 'complete processing' || orderStatus === 'completed orders'
       ? categorizedNumbers.strive
-      : orderStatus === 'on hold'
+      : orderStatus === 'on hold' || /^problem tier\b.*\bunresolved$/.test(orderStatus)
         ? categorizedNumbers.onHold
         : orderStatus === 'future orders'
           ? categorizedNumbers.future

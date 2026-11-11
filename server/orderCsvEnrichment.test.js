@@ -429,6 +429,29 @@ test('routes Strive numbers into columns by order status', () => {
 })
 
 
+test('recognizes unresolved Strive problem orders as on hold without importing deleted orders', () => {
+  const lookup = buildStriveCsvLookup([
+    { 'First Name': 'Yeiri', 'Last Name': 'Urena', Medication: 'SPS - Tirzepatide/Glycine/B12 1mg (10 Units) (1mL Vial) Microdose - U.S.', Order: '113888593', 'Order Status': 'Problem Tier 1/Tier X - Unresolved' },
+    { 'First Name': 'Hendry', 'Last Name': 'Rodman', Medication: 'TIRZEPATIDE/GLYCINE/B12', Order: '113888256', 'Order Status': '  Problem Tier 1/Tier X  - UNRESOLVED ' },
+    { 'First Name': 'Yeiri', 'Last Name': 'Urena', Medication: 'Tirzepatide', Order: 'deleted', 'Order Status': 'Deleted' },
+    { 'First Name': 'Other', 'Last Name': 'Patient', Medication: 'Tirzepatide', Order: 'deleted-only', 'Order Status': 'Deleted' },
+  ])
+  const result = enrichStriveOrderNumbers([
+    order({ clientName: 'Yeiri Urena', treatment: '1x Tirzepatide - Microdose' }),
+    order({ clientName: 'Hendry Rodman', treatment: '1x Microdose Tirzepatide - 2 Months' }),
+    order({ clientName: 'Other Patient' }),
+  ], lookup)
+
+  assert.equal(result.matchedCount, 2)
+  assert.deepEqual(result.rows.map((row) => row.striveOrderNumber2), ['113888593', '113888256', undefined])
+  for (const row of result.rows.slice(0, 2)) {
+    assert.equal(row.doctorPrescribed, 'YES')
+    assert.equal(row.prescribedPharmacy, 'YES')
+    assert.equal(row.striveOrderNumber1, undefined)
+  }
+  assert.equal(result.rows[2].doctorPrescribed, undefined)
+})
+
 test('sets both prescription fields only for matched Strive orders with numbers', () => {
   for (const status of ['Complete Processing', 'Completed Orders', 'On Hold', 'Future Orders']) {
     const lookup = buildStriveCsvLookup([
