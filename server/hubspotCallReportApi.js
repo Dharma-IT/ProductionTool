@@ -17,7 +17,7 @@ import {
   verifyAircallWebhookToken,
 } from './aircall.js'
 import { fetchAircallAnalyticsCalls } from './aircallAnalytics.js'
-import { enrichShopifyShipments } from './shopifyShipmentDetails.js'
+import { enrichShopifyShipments, excludeCancelledFulfillments } from './shopifyShipmentDetails.js'
 import { isShipmentLate } from '../src/services/shipmentDetails.js'
 
 loadLocalEnv()
@@ -1550,7 +1550,7 @@ async function buildShopifyTrackingReport(options = {}) {
     'line_items',
     'fulfillments',
   ].join(',')
-  const { orders, pageCount, hitPageLimit } = await loadShopifyOrders({
+  const { orders: fetchedOrders, pageCount, hitPageLimit } = await loadShopifyOrders({
     status: 'any',
     limit: pageLimit,
     // Fetch newest orders first so a configured page cap can only truncate
@@ -1559,6 +1559,8 @@ async function buildShopifyTrackingReport(options = {}) {
     created_at_min: createdAtMin,
     fields,
   }, { fullScan: options.forceRefresh })
+  // Cancelled labels remain in Shopify's history but are not outstanding packages.
+  const orders = fetchedOrders.map(excludeCancelledFulfillments)
   const hiddenOrderNumbers = new Set(
     orders
       .filter(isRefundedOrCancelledShopifyOrder)

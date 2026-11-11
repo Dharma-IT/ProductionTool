@@ -1,8 +1,29 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { isShipmentLate, formatShipmentDate } from '../src/services/shipmentDetails.js'
-import { enrichShopifyShipments } from './shopifyShipmentDetails.js'
+import { enrichShopifyShipments, excludeCancelledFulfillments } from './shopifyShipmentDetails.js'
 import { getOrderWarningSummary } from '../src/services/trackingAnalytics.js'
+
+test('cancelled labels do not block delivery and active split shipments remain', async () => {
+  const cancelled = { id: 1, status: 'cancelled', shipment_status: 'in_transit', tracking_numbers: ['old-label'] }
+  const delivered = { id: 2, status: 'success', shipment_status: 'delivered', tracking_numbers: ['current-label'] }
+  const pending = { id: 3, status: 'success', shipment_status: 'in_transit' }
+  const original = { fulfillments: [cancelled, delivered] }
+  const order = excludeCancelledFulfillments(original)
+  assert.deepEqual(order.fulfillments, [delivered])
+  assert.equal(original.fulfillments.length, 2)
+  await enrichShopifyShipments([order], async (_, { ids }) => {
+    assert.deepEqual(ids, ['gid://shopify/Fulfillment/2'])
+    return { data: { nodes: [{ id: ids[0], displayStatus: 'DELIVERED' }] } }
+  })
+  assert.deepEqual(order.fulfillments.flatMap(f => f.tracking_numbers), ['current-label'])
+  assert.ok(order.fulfillments.every(f => f.shipment_status === 'delivered'))
+  const split = excludeCancelledFulfillments({ fulfillments: [cancelled, delivered, pending] })
+  assert.deepEqual(split.fulfillments, [delivered, pending])
+  assert.equal(split.fulfillments.every(f => f.shipment_status === 'delivered'), false)
+  assert.deepEqual(excludeCancelledFulfillments({ fulfillments: [cancelled] }).fulfillments, [])
+  assert.deepEqual(excludeCancelledFulfillments({}).fulfillments, [])
+})
 
 test('late uses the business calendar date and clears on delivery', () => {
   const shipment = { estimatedDeliveryAt: '2026-11-03T01:50:00Z' }

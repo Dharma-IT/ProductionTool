@@ -1,3 +1,11 @@
+export function excludeCancelledFulfillments(order) {
+  return {
+    ...order,
+    fulfillments: (order.fulfillments ?? []).filter((fulfillment) =>
+      !['cancelled', 'canceled'].includes(String(fulfillment.status ?? '').trim().toLowerCase())),
+  }
+}
+
 export async function enrichShopifyShipments(orders, graphql, checkedAt = new Date().toISOString()) {
   const fulfillments = orders.flatMap((order) => order.fulfillments ?? [])
   const unique = [...new Map(fulfillments.map((f) => [String(f.id), f])).values()]
