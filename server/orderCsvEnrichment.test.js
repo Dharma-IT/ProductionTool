@@ -385,6 +385,34 @@ test('combines distinct Strive order numbers in CSV order and ignores blanks and
   assert.equal(result.rows[0].striveOrderNumber1, '11111, 212222')
 })
 
+test('imports current new-tier and future numbers together when repairing a future-only order', () => {
+  const lookup = buildStriveCsvLookup([
+    { 'First Name': 'Test', 'Last Name': 'Patient', Medication: 'TIRZEPATIDE/GLYCINE/B12', Order: 'future-123', 'Order Status': 'Future Orders' },
+    { 'First Name': 'Test', 'Last Name': 'Patient', Medication: 'Tirzepatide/Glycine/B12 10mg/5mg/500mcg/ml (3ml Vial) U.S.', Order: 'current-123', 'Order Status': 'New Tier 1' },
+  ])
+  const original = order({ clientName: 'Test Patient', treatment: '1x Compounded Tirzepatide 52mg', futureOrderNumber: 'future-123' })
+  const result = enrichStriveOrderNumbers([original], lookup)
+
+  assert.equal(result.rows[0].striveOrderNumber1, 'current-123')
+  assert.equal(result.rows[0].futureOrderNumber, 'future-123')
+  assert.equal(result.rows[0].striveOrderNumber2, undefined)
+  assert.equal(result.matchedCount, 1)
+  assert.deepEqual(enrichStriveOrderNumbers(result.rows, lookup).rows, result.rows)
+  assert.equal(original.striveOrderNumber1, undefined)
+})
+
+test('normalizes new-tier statuses while continuing to skip unknown and deleted statuses', () => {
+  for (const status of ['New Tier 1', '  NEW   TIER 2  ', 'New Tier 10', 'Deleted', 'New Tier 1 - Deleted', 'Unknown']) {
+    const lookup = buildStriveCsvLookup([
+      { 'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'Tirzepatide', Order: '123', 'Order Status': status },
+    ])
+    const result = enrichStriveOrderNumbers([order()], lookup)
+    const expected = ['Deleted', 'New Tier 1 - Deleted', 'Unknown'].includes(status) ? undefined : '123'
+    assert.equal(result.rows[0].striveOrderNumber1, expected, status)
+    assert.equal(result.matchedCount, expected ? 1 : 0, status)
+  }
+})
+
 test('does not overwrite an existing Strive value when medication does not match', () => {
   const lookup = buildStriveCsvLookup([{
     'First Name': 'Jeuz', 'Last Name': 'Vinci', Medication: 'NAD+', Order: '99999',

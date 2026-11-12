@@ -168,7 +168,9 @@ export function buildStriveCsvLookup(csvRows) {
       onHold: [],
       future: [],
     }
+    // New tier orders already have a current Strive number, even before processing completes.
     const destination = orderStatus === 'complete processing' || orderStatus === 'completed orders'
+      || /^new tier \d+$/.test(orderStatus)
       ? categorizedNumbers.strive
       : orderStatus === 'on hold' || /^problem tier\b.*\bunresolved$/.test(orderStatus)
         ? categorizedNumbers.onHold
