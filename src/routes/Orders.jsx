@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
+import { readOrderCsvWorkbook } from '../services/orderCsvReader'
 import { loadHubSpotOrders } from '../services/hubspotOrders'
 import { acceptPendingMedicalForm, loadOrdersHistory, loadPendingMedicalForms, reconcilePendingMedicalForms, saveOrdersHistory } from '../services/ordersHistory'
 import { formatOrderPurchaseDate } from '../services/orderDates'
@@ -225,7 +226,7 @@ function Orders() {
     setStriveCsvError('')
 
     try {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const workbook = readOrderCsvWorkbook(await file.arrayBuffer())
       const worksheet = workbook.Sheets[workbook.SheetNames[0]]
       if (!worksheet) throw new Error('The CSV does not contain a readable worksheet.')
 
@@ -258,7 +259,7 @@ function Orders() {
     setStriveCsvError('')
 
     try {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const workbook = readOrderCsvWorkbook(await file.arrayBuffer())
       const worksheet = workbook.Sheets[workbook.SheetNames[0]]
       if (!worksheet) throw new Error('The Strive CSV does not contain a readable worksheet.')
 
