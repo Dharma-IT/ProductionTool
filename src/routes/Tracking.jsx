@@ -21,6 +21,7 @@ const trackingRowsPageSize = 100
 
 const trackingExportFields = [
   ['Order Number', 'orderNumber'],
+  ['TikTok Order ID', 'tiktokOrderId'],
   ['Supliful Order', 'suplifulOrder'],
   ['Item', 'item'],
   ['Name', 'name'],

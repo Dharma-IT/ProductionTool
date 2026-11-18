@@ -1,6 +1,6 @@
 import { collectTrackingPages, refreshTrackingPages } from './trackingPagination'
 
-const sessionCacheKey = 'shopify-tracking-report:v8'
+const sessionCacheKey = 'shopify-tracking-report:v9'
 const defaultRowsLimit = 1000
 const sessionCacheTtlMs = 5 * 60 * 1000
 
@@ -18,6 +18,7 @@ function normalizeTrackingRow(row) {
     riskRemovedAt: row.riskRemovedAt ?? null,
     riskRemovalReason: row.riskRemovalReason ?? null,
     orderNumber: row.orderNumber ?? '',
+    tiktokOrderId: String(row.tiktokOrderId ?? ''),
     suplifulOrder: row.suplifulOrder ?? '',
     item: row.item ?? '',
     name: row.name ?? '',

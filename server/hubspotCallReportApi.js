@@ -1,3 +1,4 @@
+import { readTikTokOrderId } from '../src/services/shopifyOrderTags.js'
 import { countCalendarDays, getNormalizedTrackingStatus, getTrackingScanCreatedAtMin, isTrackingRiskDate, isDeliveryRiskExcluded, maxRiskAgeDays, overdueDaysThreshold, reconcileDeliveredShipments } from '../src/services/trackingAnalytics.js'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
@@ -878,6 +879,7 @@ function buildTrackingDatabaseRow(row, sourceUpdatedAt) {
 function normalizeTrackingDatabaseRow(row) {
   return {
     rowId: row.row_id,
+    tiktokOrderId: row.raw_data?.tiktokOrderId ?? readTikTokOrderId(row.raw_data?.tags),
     manualStatus: row.manual_status ?? null,
     riskRemovedAt: row.risk_removed_at ?? null,
     riskRemovalReason: row.risk_removal_reason ?? null,
@@ -1025,6 +1027,7 @@ function buildPaymentHistoryDatabaseRow(row) {
 function normalizePaymentHistoryDatabaseRow(row) {
   return {
     rowId: row.row_id,
+    tiktokOrderId: row.raw_data?.tiktokOrderId ?? readTikTokOrderId(row.raw_data?.tags),
     manualStatus: row.manual_status ?? null,
     riskRemovedAt: row.risk_removed_at ?? null,
     riskRemovalReason: row.risk_removal_reason ?? null,
@@ -1193,6 +1196,7 @@ function normalizeOrdersHistoryDatabaseRow(row) {
     ...(row.raw_data ?? {}),
     id: row.row_id,
     rowId: row.row_id,
+    tiktokOrderId: row.raw_data?.tiktokOrderId ?? readTikTokOrderId(row.raw_data?.tags),
     manualStatus: row.manual_status ?? null,
     riskRemovedAt: row.risk_removed_at ?? null,
     riskRemovalReason: row.risk_removal_reason ?? null,
@@ -1453,6 +1457,7 @@ function normalizeShopifyOrder(order) {
 
   return {
     rowId: String(order.id),
+    tiktokOrderId: readTikTokOrderId(order.tags),
     financialStatus: order.financial_status ?? '',
     cancelledAt: order.cancelled_at ?? '',
     shipmentDetails: fulfillments.map((f) => f.shipmentDetails).filter(Boolean),
@@ -1480,6 +1485,7 @@ function normalizeShopifyOrderLine(order, lineItem, lineItemIndex) {
 
   return {
     rowId: `${order.id}:${lineItem.id ?? lineItemIndex}`,
+    tiktokOrderId: readTikTokOrderId(order.tags),
     financialStatus: order.financial_status ?? '',
     cancelledAt: order.cancelled_at ?? '',
     shipmentDetails: fulfillments.map((f) => f.shipmentDetails).filter(Boolean),
