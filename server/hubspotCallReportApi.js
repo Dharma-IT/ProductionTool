@@ -878,6 +878,9 @@ function buildTrackingDatabaseRow(row, sourceUpdatedAt) {
 function normalizeTrackingDatabaseRow(row) {
   return {
     rowId: row.row_id,
+    manualStatus: row.manual_status ?? null,
+    riskRemovedAt: row.risk_removed_at ?? null,
+    riskRemovalReason: row.risk_removal_reason ?? null,
     orderNumber: row.order_number ?? '',
     suplifulOrder: row.supliful_order ?? '',
     item: row.item ?? '',
@@ -1022,6 +1025,9 @@ function buildPaymentHistoryDatabaseRow(row) {
 function normalizePaymentHistoryDatabaseRow(row) {
   return {
     rowId: row.row_id,
+    manualStatus: row.manual_status ?? null,
+    riskRemovedAt: row.risk_removed_at ?? null,
+    riskRemovalReason: row.risk_removal_reason ?? null,
     Date: isoDateToDisplay(row.payment_date) || row.display_date || '',
     'Total Collected': row.total_collected ?? '',
     'Tender Note': row.tender_note ?? '',
@@ -1187,6 +1193,9 @@ function normalizeOrdersHistoryDatabaseRow(row) {
     ...(row.raw_data ?? {}),
     id: row.row_id,
     rowId: row.row_id,
+    manualStatus: row.manual_status ?? null,
+    riskRemovedAt: row.risk_removed_at ?? null,
+    riskRemovalReason: row.risk_removal_reason ?? null,
     reportDate: row.report_date,
     clientName: row.client_name ?? row.raw_data?.clientName ?? '',
     treatment: row.treatment ?? row.raw_data?.treatment ?? '',
@@ -3921,6 +3930,35 @@ const server = createServer(async (request, response) => {
       'Cache-Control': 'no-store',
       'Retry-After': '8',
     })
+    return
+  }
+
+  if (requestUrl.pathname === '/api/shopify/tracking/remove-risk' && request.method === 'POST') {
+    try {
+      const payload = await readJsonRequest(request)
+      const orderNumber = typeof payload.orderNumber === 'string' ? payload.orderNumber.trim() : ''
+      const reason = typeof payload.reason === 'string' ? payload.reason.trim() : ''
+      const statuses = ['Delivered', 'In transit', 'In progress', 'Failed delivery', 'Cancelled', 'Resolved']
+      if (!orderNumber || orderNumber.length > 200 || !reason || reason.length > 2000 || !statuses.includes(payload.status)) {
+        sendJson(request, response, 400, { message: 'Select a new status and enter a reason (up to 2,000 characters).' })
+        return
+      }
+      if (!hasSupabaseConfig()) throw new Error('Shared tracking storage is not configured.')
+      const removedAt = new Date().toISOString()
+      const params = new URLSearchParams({ order_number: `eq.${orderNumber}`, select: 'row_id' })
+      const rows = await supabaseRequest(`/${supabaseTrackingTable}?${params}`, {
+        method: 'PATCH', headers: { Prefer: 'return=representation' },
+        body: { manual_status: payload.status, risk_removed_at: removedAt, risk_removal_reason: reason },
+      })
+      if (!Array.isArray(rows) || !rows.length) {
+        sendJson(request, response, 404, { message: 'Order not found in saved tracking records. Refresh and retry.' })
+        return
+      }
+      trackingCache.clear()
+      sendJson(request, response, 200, { manualStatus: payload.status, riskRemovedAt: removedAt, riskRemovalReason: reason })
+    } catch (error) {
+      sendJson(request, response, 500, { message: error.message })
+    }
     return
   }
 

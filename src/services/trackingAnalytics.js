@@ -100,6 +100,7 @@ export function isDeliveryRiskExcluded(row) {
 export function reconcileDeliveredShipments(rows) {
   rows = rows.map((row) => {
     const shipments = row.shipmentDetails ?? []
+    if (row.manualStatus) return { ...row, status: row.manualStatus, statusSource: 'manual', normalizedStatus: getNormalizedTrackingStatus(row.manualStatus) }
     const delivered = getNormalizedTrackingStatus(row.status) === 'delivered'
       || Boolean(row.deliveryDate)
       || (!row.shipmentDetailsError && shipments.length > 0 && shipments.every(isShipmentDelivered))
@@ -123,7 +124,7 @@ export function reconcileDeliveredShipments(rows) {
   })
   return rows.map((row) => {
     const keys = trackingKeys(row)
-    if (!keys.length || !keys.every((key) => delivered.has(key))) return row
+    if (row.manualStatus || !keys.length || !keys.every((key) => delivered.has(key))) return row
     const evidence = delivered.get(keys[0])
     return {
       ...row,
@@ -153,7 +154,7 @@ export function getOrderWarningSummary(rows, today = getTrackingBusinessToday())
       status: '',
     }
 
-    const withinRiskWindow = !isDeliveryRiskExcluded(row)
+    const withinRiskWindow = !row.riskRemovedAt && !isDeliveryRiskExcluded(row)
       && isTrackingRiskDate(row.date, today)
     nextOrder.failed = nextOrder.failed || (withinRiskWindow && row.normalizedStatus === 'failed')
     nextOrder.overdue = nextOrder.overdue

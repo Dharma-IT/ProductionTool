@@ -3883,3 +3883,16 @@
 @media (prefers-reduced-motion: reduce) {
   .tracking-scanner span { animation: none; transform: translateY(18px); }
 }
+
+.tracking-risk-order-heading { display: flex; align-items: center; gap: 6px; }
+.tracking-risk-remove { border: 0; background: transparent; color: #87968c; cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 6px; border-radius: 4px; }
+.tracking-risk-remove:hover, .tracking-risk-remove:focus-visible { color: #8c1f16; background: #fff0e9; }
+.tracking-removal-dialog { width: min(460px, calc(100vw - 48px)); border: 1px solid #ded9c3; border-radius: 14px; padding: 24px; background: #fffef9; color: #2d3f33; }
+.tracking-removal-dialog::backdrop { background: rgb(20 35 28 / 45%); }
+.tracking-removal-dialog h2 { margin-top: 0; font-size: 1.2rem; }
+.tracking-removal-dialog p { line-height: 1.5; }
+.tracking-removal-dialog label { display: block; margin: 16px 0 6px; font-weight: 700; }
+.tracking-removal-dialog select, .tracking-removal-dialog textarea { box-sizing: border-box; width: 100%; border: 1px solid #cecbb6; border-radius: 6px; padding: 10px; font: inherit; }
+.tracking-removal-dialog textarea { resize: vertical; }
+.tracking-removal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.tracking-manual-update { white-space: normal; overflow-wrap: anywhere; }

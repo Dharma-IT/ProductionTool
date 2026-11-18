@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import { loadAllShopifyTracking } from '../services/shopifyTracking'
+import { loadAllShopifyTracking, removeTrackingRisk } from '../services/shopifyTracking'
 import { formatShipmentDate, isShipmentLate } from '../services/shipmentDetails'
 import { countOpenDays, getNormalizedTrackingStatus, getOrderWarningSummary, getTrackingOrderKey, overdueDaysThreshold, parseTrackingDate, reconcileDeliveredShipments } from '../services/trackingAnalytics'
 
@@ -74,7 +74,7 @@ function getTrackingStatusClass(value) {
 function getStatusSourceLabel(value) {
   if (value === 'usps') return 'Updated from USPS tracking'
   if (value === 'shopify') return 'Updated from Shopify fulfillment status'
-  if (value === 'manual') return 'Manually marked delivered'
+  if (value === 'manual') return 'Manually updated status'
 
   return 'Updated from Google Sheet'
 }
@@ -87,6 +87,32 @@ function getTrackingSourceLabel(value) {
 }
 
 function Tracking() {
+  const removalDialog = useRef(null)
+  const [removingOrder, setRemovingOrder] = useState(null)
+  const [removalReason, setRemovalReason] = useState('')
+  const [newStatus, setNewStatus] = useState('')
+  const [savingRemoval, setSavingRemoval] = useState(false)
+  const [removalError, setRemovalError] = useState('')
+  useEffect(() => {
+    if (removingOrder) removalDialog.current?.showModal()
+    else removalDialog.current?.close()
+  }, [removingOrder])
+  async function confirmRemoval(event) {
+    event.preventDefault()
+    if (savingRemoval || !removalReason.trim() || !newStatus) return
+    setSavingRemoval(true)
+    setRemovalError('')
+    try {
+      const update = await removeTrackingRisk(removingOrder.orderNumber, newStatus, removalReason.trim())
+      setReport((current) => ({ ...current, rows: current.rows.map((row) =>
+        getTrackingOrderKey(row) === getTrackingOrderKey(removingOrder) ? { ...row, ...update } : row) }))
+      setRemovingOrder(null)
+    } catch (saveError) {
+      setRemovalError(saveError.message)
+    } finally {
+      setSavingRemoval(false)
+    }
+  }
   const [report, setReport] = useState({ source: 'supabase', rows: [] })
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
@@ -224,6 +250,27 @@ function Tracking() {
 
   return (
     <section className="route-view" aria-label="Tracking dashboard">
+      <dialog ref={removalDialog} className="tracking-removal-dialog"
+        aria-labelledby="risk-removal-title"
+        onCancel={(event) => { if (savingRemoval) event.preventDefault(); else setRemovingOrder(null) }}>
+        <form onSubmit={confirmRemoval}>
+          <h2 id="risk-removal-title">Remove {removingOrder?.orderNumber} from delivery risk</h2>
+          <p>Select the order?s new status and give a reason. The reason will be saved in Shipment updates.</p>
+          <label htmlFor="risk-new-status">New status</label>
+          <select id="risk-new-status" required value={newStatus} disabled={savingRemoval} onChange={(event) => setNewStatus(event.target.value)}>
+            <option value="" disabled>Select a status</option>
+            {['Delivered', 'In transit', 'In progress', 'Failed delivery', 'Cancelled', 'Resolved'].map((value) => <option key={value}>{value}</option>)}
+          </select>
+          <label htmlFor="risk-removal-reason">Reason</label>
+          <textarea id="risk-removal-reason" required maxLength={2000} rows={4} value={removalReason}
+            disabled={savingRemoval} onChange={(event) => setRemovalReason(event.target.value)} />
+          {removalError && <p role="alert" className="report-alert">{removalError}</p>}
+          <div className="tracking-removal-actions">
+            <button className="filter-button" type="button" disabled={savingRemoval} onClick={() => setRemovingOrder(null)}>Cancel</button>
+            <button className="filter-button" type="submit" disabled={savingRemoval || !newStatus || !removalReason.trim()}>{savingRemoval ? 'Saving?' : 'Save and remove'}</button>
+          </div>
+        </form>
+      </dialog>
       <div className="report-toolbar">
         <div>
           <h1>Tracking</h1>
@@ -352,7 +399,15 @@ function Tracking() {
                 {analytics.warningOrders.map((row) => (
                   <div className="tracking-warning-item" key={`${getTrackingOrderKey(row)}-warning`}>
                     <div>
-                      <strong>{row.orderNumber}</strong>
+                      <div className="tracking-risk-order-heading">
+                        <strong>{row.orderNumber}</strong>
+                        <button className="tracking-risk-remove" type="button"
+                          aria-label={`Remove ${row.orderNumber} from delivery risk`}
+                          title="Remove from delivery risk"
+                          onClick={() => { setRemovingOrder(row); setRemovalReason(''); setNewStatus(''); setRemovalError('') }}>
+                          ?
+                        </button>
+                      </div>
                       <span>{row.name || 'No name'}</span>
                     </div>
                     <div>
@@ -440,6 +495,11 @@ function Tracking() {
                     )}
                   </td>
                   <td className="shipment-updates">
+                    {row.riskRemovedAt && <div className="shipment-update tracking-manual-update">
+                      <strong>Delivery risk removed ? {row.manualStatus}</strong>
+                      <div>{row.riskRemovalReason}</div>
+                      <small>Manual update ? {new Date(row.riskRemovedAt).toLocaleString()}</small>
+                    </div>}
                     {row.shipmentDetails?.length ? row.shipmentDetails.map((shipment) => (
                       <div className="shipment-update" key={shipment.fulfillmentId}>
                         <strong>{shipment.status?.replaceAll('_', ' ').toLowerCase()}</strong>

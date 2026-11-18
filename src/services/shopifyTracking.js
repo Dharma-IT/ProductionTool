@@ -1,6 +1,6 @@
 import { collectTrackingPages, refreshTrackingPages } from './trackingPagination'
 
-const sessionCacheKey = 'shopify-tracking-report:v7'
+const sessionCacheKey = 'shopify-tracking-report:v8'
 const defaultRowsLimit = 1000
 const sessionCacheTtlMs = 5 * 60 * 1000
 
@@ -14,6 +14,9 @@ function getSessionCacheKey(options = {}) {
 function normalizeTrackingRow(row) {
   return {
     rowId: row.rowId ?? row.id ?? row.orderNumber,
+    manualStatus: row.manualStatus ?? null,
+    riskRemovedAt: row.riskRemovedAt ?? null,
+    riskRemovalReason: row.riskRemovalReason ?? null,
     orderNumber: row.orderNumber ?? '',
     suplifulOrder: row.suplifulOrder ?? '',
     item: row.item ?? '',
@@ -176,4 +179,27 @@ export async function loadAllShopifyTracking(options = {}) {
       if (refreshed.databaseError) throw new Error(`Live sync failed: ${refreshed.databaseError}`)
     },
   })
+}
+
+export async function removeTrackingRisk(orderNumber, status, reason) {
+  const endpoint = import.meta.env.VITE_SHOPIFY_TRACKING_URL
+  if (!endpoint) throw new Error('Tracking API is not configured.')
+  const url = new URL(endpoint, window.location.origin)
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/remove-risk`
+  url.search = ''
+  const response = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderNumber, status, reason }),
+  })
+  const payload = await response.json()
+  if (!response.ok) throw new Error(payload.message || 'Could not remove delivery risk.')
+  try {
+    for (let i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
+      const key = window.sessionStorage.key(i)
+      if (key?.startsWith(sessionCacheKey)) window.sessionStorage.removeItem(key)
+    }
+  } catch {
+    // Storage restrictions must not turn a successful save into an error.
+  }
+  return payload
 }

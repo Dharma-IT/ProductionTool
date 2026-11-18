@@ -63,7 +63,7 @@ test('includes #7226 and previously excluded customers/products and deduplicates
     aged({ orderNumber: '#7000', item: 'Detox Tea', date: '10/16/2026', status: 'In transit' }),
     aged({ orderNumber: '#7001', date: '10/16/2026', status: 'Delivered' }),
     aged({ orderNumber: '#7002', date: '10/28/2026', status: 'Failed delivery' }),
-  ])
+  ], new Date('2026-10-28T12:00:00Z'))
   assert.deepEqual(summary.overdueOrders.map(r => r.orderNumber), ['#7226', '#7000'])
   assert.equal(summary.warningOrders.length, 3)
   assert.equal(summary.failedOrders.length, 1)
@@ -212,4 +212,20 @@ test('only named exclusions clear risk; other tracked orders and failed deliveri
   assert.deepEqual(summary.failedOrders.map(row => row.orderNumber), ['#failed'])
   assert.equal(summary.activeOrders.length, 4)
   assert.equal(rows[0].status, 'In progress')
+})
+
+test('manual risk removal clears warnings while preserving order and chosen status', () => {
+  const summary = getOrderWarningSummary([
+    { ...aged({ orderNumber: '#manual', date: '10/16/2026', status: 'Failed delivery' }),
+      manualStatus: 'In transit', riskRemovedAt: '2026-10-28T12:00:00Z',
+      riskRemovalReason: 'Replacement shipment arranged',
+      shipmentDetails: [{ status: 'DELAYED', latestMessage: 'Arriving Late' }] },
+    aged({ orderNumber: '#remaining', date: '10/16/2026', status: 'In transit' }),
+  ], new Date('2026-10-28T12:00:00Z'))
+  assert.deepEqual(summary.warningOrders.map(row => row.orderNumber), ['#remaining'])
+  assert.deepEqual(summary.overdueOrders.map(row => row.orderNumber), ['#remaining'])
+  assert.equal(summary.failedOrders.length, 0)
+  const removed = summary.activeOrders.find(row => row.orderNumber === '#manual')
+  assert.equal(removed.status, 'In transit')
+  assert.equal(removed.riskRemovalReason, 'Replacement shipment arranged')
 })
