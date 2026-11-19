@@ -3894,6 +3894,12 @@ const server = createServer(async (request, response) => {
       trackingCache.clear()
       sendJson(request, response, 200, { manualStatus: payload.status, riskRemovedAt: removedAt, riskRemovalReason: reason })
     } catch (error) {
+      if (/PGRST204/.test(error.message) && /manual_status|risk_removed_at|risk_removal_reason/.test(error.message)) {
+        sendJson(request, response, 503, {
+          message: 'Delivery-risk removal requires a database update. Run supabase/tracking_risk_removal.sql in the Supabase SQL editor, then retry. No changes were saved.',
+        })
+        return
+      }
       sendJson(request, response, 500, { message: error.message })
     }
     return

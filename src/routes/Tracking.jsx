@@ -256,7 +256,7 @@ function Tracking() {
         onCancel={(event) => { if (savingRemoval) event.preventDefault(); else setRemovingOrder(null) }}>
         <form onSubmit={confirmRemoval}>
           <h2 id="risk-removal-title">Remove {removingOrder?.orderNumber} from delivery risk</h2>
-          <p>Select the order?s new status and give a reason. The reason will be saved in Shipment updates.</p>
+          <p>Select the order's new status and give a reason. The reason will be saved in Shipment updates.</p>
           <label htmlFor="risk-new-status">New status</label>
           <select id="risk-new-status" required value={newStatus} disabled={savingRemoval} onChange={(event) => setNewStatus(event.target.value)}>
             <option value="" disabled>Select a status</option>
@@ -268,7 +268,7 @@ function Tracking() {
           {removalError && <p role="alert" className="report-alert">{removalError}</p>}
           <div className="tracking-removal-actions">
             <button className="filter-button" type="button" disabled={savingRemoval} onClick={() => setRemovingOrder(null)}>Cancel</button>
-            <button className="filter-button" type="submit" disabled={savingRemoval || !newStatus || !removalReason.trim()}>{savingRemoval ? 'Saving?' : 'Save and remove'}</button>
+            <button className="filter-button" type="submit" disabled={savingRemoval || !newStatus || !removalReason.trim()}>{savingRemoval ? 'Saving...' : 'Save and remove'}</button>
           </div>
         </form>
       </dialog>

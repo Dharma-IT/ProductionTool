@@ -3890,7 +3890,7 @@
 .tracking-removal-dialog { width: min(460px, calc(100vw - 48px)); border: 1px solid #ded9c3; border-radius: 14px; padding: 24px; background: #fffef9; color: #2d3f33; }
 .tracking-removal-dialog::backdrop { background: rgb(20 35 28 / 45%); }
 .tracking-removal-dialog h2 { margin-top: 0; font-size: 1.2rem; }
-.tracking-removal-dialog p { line-height: 1.5; }
+.tracking-removal-dialog p { line-height: 1.5; overflow-wrap: anywhere; }
 .tracking-removal-dialog label { display: block; margin: 16px 0 6px; font-weight: 700; }
 .tracking-removal-dialog select, .tracking-removal-dialog textarea { box-sizing: border-box; width: 100%; border: 1px solid #cecbb6; border-radius: 6px; padding: 10px; font: inherit; }
 .tracking-removal-dialog textarea { resize: vertical; }

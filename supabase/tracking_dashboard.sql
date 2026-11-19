@@ -13,6 +13,9 @@ create table if not exists public.tracking_dashboard (
   delivery_date date,
   status text,
   status_source text,
+  manual_status text,
+  risk_removed_at timestamptz,
+  risk_removal_reason text,
   business_days_open integer not null default 0,
   is_overdue boolean not null default false,
   observation text,
@@ -22,6 +25,14 @@ create table if not exists public.tracking_dashboard (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- CREATE TABLE IF NOT EXISTS does not add columns to existing installations.
+alter table public.tracking_dashboard
+  add column if not exists manual_status text,
+  add column if not exists risk_removed_at timestamptz,
+  add column if not exists risk_removal_reason text;
+
+notify pgrst, 'reload schema';
 
 create index if not exists tracking_dashboard_order_number_idx
   on public.tracking_dashboard (order_number);

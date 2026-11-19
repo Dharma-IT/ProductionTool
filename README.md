@@ -27,6 +27,14 @@ production builds continue using their configured hosted API.
 
 Deploy the frontend to Vercel and the backend API to Render.
 
+### Tracking database setup
+
+Run `supabase/tracking_dashboard.sql` in the Supabase SQL editor before using tracking.
+For an existing installation, run `supabase/tracking_risk_removal.sql` before
+deploying delivery-risk removal. It adds `manual_status`, `risk_removed_at`, and
+`risk_removal_reason` and refreshes the REST schema cache. Both scripts are safe
+to rerun. If `SUPABASE_TRACKING_TABLE` is customized, use that table name in the SQL.
+
 ### Backend: Render Web Service
 
 Use these settings:
