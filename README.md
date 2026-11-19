@@ -35,6 +35,19 @@ Use these settings:
 Build command: npm ci
 Start command: npm run api
 Health check path: /health
+
+Tracking refreshes process Shopify orders in pages of 100, enrich and persist
+each page to Supabase, then release that page before fetching the next. The
+30-day scan has no page cap. Concurrent refresh requests share one active sync
+within the API process, including requests with different display pagination.
+Supabase configuration is required for live tracking refreshes. Saved rows stay
+available during a sync; an enrichment or database failure leaves the scan
+incomplete, even if earlier pages were saved successfully.
+
+After deploying tracking changes, check Render memory metrics during a complete
+refresh and concurrent browser refreshes. Sync coordination is in memory for a
+single API instance; restarts start a new scan, and multiple API instances would
+need a database-backed job lock/checkpoint before scaling out.
 ```
 
 Set these Render environment variables:

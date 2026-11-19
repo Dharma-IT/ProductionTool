@@ -19,6 +19,7 @@ import {
 } from './aircall.js'
 import { fetchAircallAnalyticsCalls } from './aircallAnalytics.js'
 import { enrichShopifyShipments, excludeCancelledFulfillments } from './shopifyShipmentDetails.js'
+import { scanTrackingPages, createSharedTrackingSync } from './trackingSync.js'
 import { isShipmentLate } from '../src/services/shipmentDetails.js'
 
 loadLocalEnv()
@@ -54,7 +55,7 @@ const stripeVerificationCache = new Map()
 const currentDateCacheTtlMs = 5 * 60 * 1000
 const pastDateCacheTtlMs = 24 * 60 * 60 * 1000
 const inFlightReports = new Map()
-const inFlightTrackingReports = new Map()
+const runTrackingSync = createSharedTrackingSync()
 const trackingSyncJobs = new Map()
 const reportErrors = new Map()
 const hubspotMaxAttempts = 6
@@ -964,7 +965,11 @@ async function loadTrackingRowsFromSupabase(options = {}) {
 
     if (!Array.isArray(pageRows) || pageRows.length === 0) break
 
-    rows.push(...filterExcludedTrackingOrders(pageRows, hiddenOrderNumbers))
+    rows.push(...filterExcludedTrackingOrders(pageRows, hiddenOrderNumbers).filter((row) =>
+      !isRefundedOrCancelledShopifyOrder({
+        financial_status: row.raw_data?.financialStatus ?? row.raw_data?.financial_status,
+        cancelled_at: row.raw_data?.cancelledAt ?? row.raw_data?.cancelled_at,
+      })))
 
     if (pageRows.length < limit) break
 
@@ -1516,39 +1521,8 @@ function normalizeShopifyOrderLine(order, lineItem, lineItemIndex) {
 
 
 
-async function loadShopifyOrders(firstPageParams, { fullScan = false } = {}) {
-  const orders = []
-  let pageInfo = ''
-  let pageCount = 0
-  const maxPages = fullScan ? Infinity : Number(process.env.SHOPIFY_TRACKING_MAX_PAGES ?? 40)
-
-  do {
-    const params = pageInfo
-      ? { limit: firstPageParams.limit, page_info: pageInfo }
-      : firstPageParams
-    const { payload, nextPageInfo } = await shopifyFetch('/orders.json', params)
-
-    const pageOrders = payload.orders ?? []
-    const cutoff = firstPageParams.created_at_min ? Date.parse(firstPageParams.created_at_min) : null
-    // Orders are newest first, so there is no need to fetch past the cutoff.
-    const boundary = cutoff === null ? -1 : pageOrders.findIndex((order) => Date.parse(order.created_at) < cutoff)
-    orders.push(...(boundary < 0 ? pageOrders : pageOrders.slice(0, boundary)))
-    pageInfo = boundary < 0 ? (nextPageInfo ?? '') : ''
-    pageCount += 1
-  } while (pageInfo && pageCount < maxPages)
-
-  return {
-    orders,
-    pageCount,
-    hitPageLimit: Boolean(pageInfo),
-  }
-}
-
-async function buildShopifyTrackingReport(options = {}) {
-  const limit = options.shopifyLimit ?? options.limit
-  const rowsLimit = readTrackingRowsLimit(options.rowsLimit)
-  const rowsOffset = readTrackingRowsOffset(options.rowsOffset)
-  const pageLimit = Math.min(Math.max(Number(limit) || 250, 1), 250)
+async function syncShopifyTrackingPages() {
+  if (!hasSupabaseConfig()) throw new Error('Tracking sync requires Supabase configuration')
   const createdAtMin = getTrackingScanCreatedAtMin()
   const fields = [
     'id',
@@ -1565,110 +1539,66 @@ async function buildShopifyTrackingReport(options = {}) {
     'billing_address',
     'line_items',
     'fulfillments',
+    'tags',
   ].join(',')
-  const { orders: fetchedOrders, pageCount, hitPageLimit } = await loadShopifyOrders({
-    status: 'any',
-    limit: pageLimit,
-    // Fetch newest orders first so a configured page cap can only truncate
-    // older history, never the most recent Shopify orders.
-    order: 'created_at desc',
-    created_at_min: createdAtMin,
-    fields,
-  }, { fullScan: options.forceRefresh })
-  // Cancelled labels remain in Shopify's history but are not outstanding packages.
-  const orders = fetchedOrders.map(excludeCancelledFulfillments)
-  const hiddenOrderNumbers = new Set(
-    orders
-      .filter(isRefundedOrCancelledShopifyOrder)
-      .map((order) => normalizeTrackingOrderKey(order.name ?? order.order_number ?? order.id))
-      .filter(Boolean),
-  )
-  const visibleOrders = orders.filter((order) => !isRefundedOrCancelledShopifyOrder(order))
-  try {
-    // Every order already has fresh REST fulfillment statuses. Only fetch the
-    // additional event/ETA details for open shipments eligible for risk.
-    const riskOrders = orders.filter((order) => {
-      return isTrackingRiskDate(formatShopifyDate(order.created_at))
-        && (order.fulfillments ?? []).some((fulfillment) => fulfillment.shipment_status !== 'delivered')
-    })
-    await enrichShopifyShipments(riskOrders, shopifyGraphql)
-  } catch (error) {
-    if (options.forceRefresh) throw new Error(`Shopify shipment update failed: ${error.message}`, { cause: error })
-    // Keep the base tracking report usable, and expose the missing enrichment.
-    orders.forEach((order) => { order.shipmentDetailsError = error.message })
-  }
-  const rows = filterExcludedTrackingOrders(visibleOrders.flatMap((order) => {
-    const lineItems = order.line_items ?? []
-
-    return lineItems.length > 0
-      ? lineItems.map((lineItem, index) => normalizeShopifyOrderLine(order, lineItem, index))
-      : [normalizeShopifyOrder(order)]
-  }))
-  const rowsWithStatuses = reconcileDeliveredShipments(rows)
-  const rowsWithStatusCount = rowsWithStatuses.filter((row) => row.status).length
-  const rowsWithUspsStatusCount = rowsWithStatuses.filter((row) => row.statusSource === 'usps').length
-  const rowsWithShopifyStatusCount = rowsWithStatuses.filter((row) => row.statusSource === 'shopify').length
-  const rowsWithDeliveryDateCount = rowsWithStatuses.filter((row) => row.deliveryDate).length
-  let databaseRows = []
-  let hasMoreRows = false
-  let databaseSynced = false
-  let databaseError = ''
+  const totals = { orderCount: 0, rowsWithStatusCount: 0, rowsWithUspsStatusCount: 0,
+    rowsWithShopifyStatusCount: 0, rowsWithDeliveryDateCount: 0 }
   const updatedAt = new Date().toISOString()
+  const { pageCount, hitPageLimit } = await scanTrackingPages({
+    fetchPage: (params) => shopifyFetch('/orders.json', params),
+    params: { status: 'any', limit: 100, order: 'created_at desc', created_at_min: createdAtMin, fields },
+    processPage: async (fetchedOrders) => {
+      // Cancelled labels remain in Shopify's history but are not outstanding packages.
+      const orders = fetchedOrders.map(excludeCancelledFulfillments)
+      const visibleOrders = orders.filter((order) => !isRefundedOrCancelledShopifyOrder(order))
+      try {
+        // Every order already has fresh REST fulfillment statuses. Only fetch the
+        // additional event/ETA details for open shipments eligible for risk.
+        const riskOrders = orders.filter((order) => {
+          return !isRefundedOrCancelledShopifyOrder(order) && isTrackingRiskDate(formatShopifyDate(order.created_at))
+            && (order.fulfillments ?? []).some((fulfillment) => fulfillment.shipment_status !== 'delivered')
+        })
+        await enrichShopifyShipments(riskOrders, shopifyGraphql)
+      } catch (error) {
+        throw new Error(`Shopify shipment update failed: ${error.message}`, { cause: error })
+      }
+      const rows = filterExcludedTrackingOrders(visibleOrders.flatMap((order) => {
+        const lineItems = order.line_items ?? []
 
-  try {
-    // Persist excluded orders too: otherwise their old active records survive
-    // the sync and reappear when the client scans stored pages.
-    const hiddenRows = orders.filter(isRefundedOrCancelledShopifyOrder).flatMap((order) =>
-      order.line_items?.length
-        ? order.line_items.map((item, index) => normalizeShopifyOrderLine(order, item, index))
-        : [normalizeShopifyOrder(order)],
-    )
-    databaseSynced = await upsertTrackingRowsToSupabase([...rowsWithStatuses, ...hiddenRows], updatedAt)
-    const databasePage = databaseSynced
-      ? await loadTrackingRowsFromSupabase({
-        limit: rowsLimit,
-        offset: rowsOffset,
-        includeHasMore: true,
-        hiddenOrderNumbers,
-      })
-      : { rows: [], hasMoreRows: false }
+        return lineItems.length > 0
+          ? lineItems.map((lineItem, index) => normalizeShopifyOrderLine(order, lineItem, index))
+          : [normalizeShopifyOrder(order)]
+      }))
+      const rowsWithStatuses = reconcileDeliveredShipments(rows)
+      const rowsWithStatusCount = rowsWithStatuses.filter((row) => row.status).length
+      const rowsWithUspsStatusCount = rowsWithStatuses.filter((row) => row.statusSource === 'usps').length
+      const rowsWithShopifyStatusCount = rowsWithStatuses.filter((row) => row.statusSource === 'shopify').length
+      const rowsWithDeliveryDateCount = rowsWithStatuses.filter((row) => row.deliveryDate).length
+      // Persist excluded orders too: otherwise their old active records survive
+      // the sync and reappear when the client scans stored pages.
+      const hiddenRows = orders.filter(isRefundedOrCancelledShopifyOrder).flatMap((order) =>
+        order.line_items?.length
+          ? order.line_items.map((item, index) => normalizeShopifyOrderLine(order, item, index))
+          : [normalizeShopifyOrder(order)],
+      )
+      await upsertTrackingRowsToSupabase([...rowsWithStatuses, ...hiddenRows], updatedAt)
+      totals.orderCount += visibleOrders.length
+      totals.rowsWithStatusCount += rowsWithStatusCount
+      totals.rowsWithUspsStatusCount += rowsWithUspsStatusCount
+      totals.rowsWithShopifyStatusCount += rowsWithShopifyStatusCount
+      totals.rowsWithDeliveryDateCount += rowsWithDeliveryDateCount
+    },
+  })
+  return { ...totals, pageCount, hitPageLimit, createdAtMin, updatedAt,
+    source: 'supabase', databaseSynced: true, databaseError: '', uspsTrackingEnabled: false, uspsTrackingError: '' }
+}
 
-    databaseRows = databasePage.rows
-    hasMoreRows = databasePage.hasMoreRows
-  } catch (error) {
-    databaseError = error.message
-  }
-  const responseRows = databaseRows.length > 0
-    ? databaseRows
-    : rowsWithStatuses
-      .sort((left, right) => readOrderSort(right.orderNumber) - readOrderSort(left.orderNumber))
-      .slice(rowsOffset, rowsOffset + rowsLimit)
-  if (databaseRows.length === 0) {
-    hasMoreRows = rowsWithStatuses.length > rowsOffset + rowsLimit
-  }
-
-  return {
-    source: databaseRows.length > 0 ? 'supabase' : 'shopify',
-    updatedAt,
-    orderCount: visibleOrders.length,
-    pageCount,
-    hitPageLimit,
-    createdAtMin: createdAtMin ?? null,
-    sheetStatusRows: null,
-    rowsWithStatusCount,
-    rowsWithUspsStatusCount,
-    rowsWithShopifyStatusCount,
-    rowsWithDeliveryDateCount,
-    uspsTrackingError: '',
-    uspsTrackingEnabled: false,
-    databaseSynced,
-    databaseRows: responseRows.length,
-    databaseError,
-    rowsLimit,
-    rowsOffset,
-    hasMoreRows,
-    rows: responseRows,
-  }
+async function buildShopifyTrackingReport(options = {}) {
+  const metadata = await runTrackingSync(syncShopifyTrackingPages)
+  const rowsLimit = readTrackingRowsLimit(options.rowsLimit)
+  const rowsOffset = readTrackingRowsOffset(options.rowsOffset)
+  const page = await loadTrackingRowsFromSupabase({ limit: rowsLimit, offset: rowsOffset, includeHasMore: true })
+  return { ...metadata, rowsLimit, rowsOffset, rows: page.rows, hasMoreRows: page.hasMoreRows }
 }
 
 async function hubspotSearch(objectType, body) {
@@ -4026,21 +3956,16 @@ const server = createServer(async (request, response) => {
       if (!job) {
         job = { status: 'pending' }
         trackingSyncJobs.set(syncId, job)
-        let work = inFlightTrackingReports.get(cacheKey)
-        if (!work) {
-          work = buildShopifyTrackingReport({ forceRefresh, shopifyLimit: limit, rowsLimit, rowsOffset })
-          inFlightTrackingReports.set(cacheKey, work)
-        }
+        const work = runTrackingSync(syncShopifyTrackingPages)
         work.then((payload) => {
           if (payload.databaseError) throw new Error(`Live sync failed: ${payload.databaseError}`)
-          trackingCache.set(cacheKey, { cachedAt: Date.now(), payload })
+          trackingCache.clear()
           job.status = 'complete'
         }).catch((error) => {
           job.status = 'error'
           job.message = error.message
         }).finally(() => {
           job.finishedAt = Date.now()
-          if (inFlightTrackingReports.get(cacheKey) === work) inFlightTrackingReports.delete(cacheKey)
         })
       }
       sendJson(request, response, job.status === 'error' ? 500 : job.status === 'pending' ? 202 : 200,
@@ -4057,21 +3982,12 @@ const server = createServer(async (request, response) => {
       return
     }
 
-    let trackingPromise = inFlightTrackingReports.get(cacheKey)
-
-    if (!trackingPromise) {
-      trackingPromise = buildShopifyTrackingReport({
-        forceRefresh,
-        shopifyLimit: limit,
-        rowsLimit,
-        rowsOffset,
-      })
-      inFlightTrackingReports.set(cacheKey, trackingPromise)
-    }
+    const trackingPromise = buildShopifyTrackingReport({ rowsLimit, rowsOffset })
 
     try {
       const payload = await trackingPromise
 
+      trackingCache.clear()
       trackingCache.set(cacheKey, {
         cachedAt: Date.now(),
         payload,
@@ -4085,8 +4001,6 @@ const server = createServer(async (request, response) => {
       }, {
         'Cache-Control': 'no-store',
       })
-    } finally {
-      inFlightTrackingReports.delete(cacheKey)
     }
     return
   }
