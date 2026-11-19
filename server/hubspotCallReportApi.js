@@ -55,6 +55,7 @@ const currentDateCacheTtlMs = 5 * 60 * 1000
 const pastDateCacheTtlMs = 24 * 60 * 60 * 1000
 const inFlightReports = new Map()
 const inFlightTrackingReports = new Map()
+const trackingSyncJobs = new Map()
 const reportErrors = new Map()
 const hubspotMaxAttempts = 6
 const hubspotRequestSpacingMs = 250
@@ -4009,6 +4010,43 @@ const server = createServer(async (request, response) => {
       process.env.SHOPIFY_TRACKING_CREATED_AT_MIN ?? 'all',
     ].join(':')
     const cachedReport = trackingCache.get(cacheKey)
+
+    // A full Shopify sync can outlast the hosting proxy's request timeout.
+    // Keep the work on the server while clients poll with short requests.
+    if (forceRefresh && requestUrl.searchParams.get('async') === '1') {
+      const syncId = requestUrl.searchParams.get('syncId')
+      if (!syncId || !/^[a-zA-Z0-9-]{1,80}$/.test(syncId)) {
+        sendJson(request, response, 400, { message: 'Invalid tracking sync ID' })
+        return
+      }
+      for (const [id, job] of trackingSyncJobs) {
+        if (job.finishedAt && Date.now() - job.finishedAt > currentDateCacheTtlMs) trackingSyncJobs.delete(id)
+      }
+      let job = trackingSyncJobs.get(syncId)
+      if (!job) {
+        job = { status: 'pending' }
+        trackingSyncJobs.set(syncId, job)
+        let work = inFlightTrackingReports.get(cacheKey)
+        if (!work) {
+          work = buildShopifyTrackingReport({ forceRefresh, shopifyLimit: limit, rowsLimit, rowsOffset })
+          inFlightTrackingReports.set(cacheKey, work)
+        }
+        work.then((payload) => {
+          if (payload.databaseError) throw new Error(`Live sync failed: ${payload.databaseError}`)
+          trackingCache.set(cacheKey, { cachedAt: Date.now(), payload })
+          job.status = 'complete'
+        }).catch((error) => {
+          job.status = 'error'
+          job.message = error.message
+        }).finally(() => {
+          job.finishedAt = Date.now()
+          if (inFlightTrackingReports.get(cacheKey) === work) inFlightTrackingReports.delete(cacheKey)
+        })
+      }
+      sendJson(request, response, job.status === 'error' ? 500 : job.status === 'pending' ? 202 : 200,
+        { syncStatus: job.status, message: job.message }, { 'Cache-Control': 'no-store' })
+      return
+    }
 
 
     if (!forceRefresh && cachedReport && Date.now() - cachedReport.cachedAt < currentDateCacheTtlMs) {

@@ -104,13 +104,26 @@ export async function loadShopifyTracking(options = {}) {
   if (options.forceRefresh) {
     requestUrl.searchParams.set('refresh', '1')
   }
+  if (options.syncId) {
+    requestUrl.searchParams.set('async', '1')
+    requestUrl.searchParams.set('syncId', options.syncId)
+  }
   requestUrl.searchParams.set('rowsLimit', String(options.rowsLimit ?? defaultRowsLimit))
   requestUrl.searchParams.set('rowsOffset', String(options.rowsOffset ?? 0))
 
-  const response = await fetch(requestUrl, {
-    cache: options.forceRefresh || options.stored ? 'no-store' : 'default',
-    signal: options.signal,
-  })
+  let response
+  try {
+    response = await fetch(requestUrl, {
+      cache: options.forceRefresh || options.stored ? 'no-store' : 'default',
+      signal: options.signal,
+    })
+  } catch (error) {
+    if (options.signal?.aborted) throw error
+    const localApi = ['localhost', '127.0.0.1', '[::1]'].includes(requestUrl.hostname)
+    throw new Error(localApi
+      ? `Cannot connect to the local tracking API at ${requestUrl.origin}. Start it with npm run api, then refresh.`
+      : `Cannot connect to the tracking API at ${requestUrl.origin}. Check your connection and retry.`, { cause: error })
+  }
 
   if (!response.ok) {
     let errorMessage = `Shopify tracking request failed: ${response.status}`
@@ -128,6 +141,7 @@ export async function loadShopifyTracking(options = {}) {
   }
 
   const payload = await response.json()
+  if (options.syncId && payload.syncStatus) return payload
   const rows = Array.isArray(payload) ? payload : payload.rows ?? payload.results ?? []
 
   const normalizedRows = rows.map(normalizeTrackingRow).filter((row) => !shouldHideTrackingRow(row))
@@ -166,11 +180,22 @@ export async function loadAllShopifyTracking(options = {}) {
   return refreshTrackingPages({
     ...options, loadPage,
     refresh: async () => {
-      const timeout = AbortSignal.timeout(90000)
+      const timeout = AbortSignal.timeout(5 * 60 * 1000)
       const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
       let refreshed
       try {
-        refreshed = await loadShopifyTracking({ forceRefresh: true, signal })
+        const syncId = crypto.randomUUID()
+        do {
+          refreshed = await loadShopifyTracking({ forceRefresh: true, signal, syncId })
+          if (refreshed.syncStatus !== 'pending') break
+          await new Promise((resolve, reject) => {
+            const onAbort = () => { clearTimeout(timer); reject(signal.reason) }
+            const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve() }, 2000)
+            signal.addEventListener('abort', onAbort, { once: true })
+            if (signal.aborted) onAbort()
+          })
+        } while (!signal.aborted)
+        signal.throwIfAborted()
       } catch (error) {
         if (timeout.aborted && !options.signal?.aborted) {
           throw new Error('Live Shopify sync timed out. Saved shipments are shown; delivery risks are not verified. Refresh to retry.', { cause: error })
